@@ -22,6 +22,13 @@
     try { return PL.normalizeModel(JSON.parse(raw)); } catch (e) { return null; }
   }
 
+  // Animation ist eine Vorliebe des Betrachters, nicht Teil des Plans → eigener Schlüssel
+  const ANIM_KEY = 'gleisplaner:anim';
+  const reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  let animOn = (() => {
+    try { const v = localStorage.getItem(ANIM_KEY); return v == null ? !reduceMotion : v === '1'; } catch (e) { return !reduceMotion; }
+  })();
+
   let model = loadStored() || EX.get('skizze');
   let plan = null;
   let sel = null;            // { type: 'node' | 'conn' | 'struct', id }
@@ -514,6 +521,19 @@
   $('#btnUndo').addEventListener('click', undo);
   $('#btnRedo').addEventListener('click', redo);
   $('#btnFit').addEventListener('click', fit);
+  function updateAnimButton() {
+    const b = $('#btnAnim');
+    b.textContent = animOn ? '⏸' : '⏵';
+    b.title = animOn ? 'Pfeil-Animation anhalten' : 'Fahrtrichtung animieren';
+    b.setAttribute('aria-label', b.title);
+    b.setAttribute('aria-pressed', String(animOn));
+  }
+  $('#btnAnim').addEventListener('click', () => {
+    animOn = !animOn;
+    try { localStorage.setItem(ANIM_KEY, animOn ? '1' : '0'); } catch (e) { /* ignorieren */ }
+    R.setAnimation(svg, animOn);
+    updateAnimButton();
+  });
   document.querySelectorAll('[data-layer]').forEach(b => b.addEventListener('click', () => {
     const k = b.dataset.layer;
     model.settings.layers[k] = !model.settings.layers[k];
@@ -630,5 +650,7 @@
   // ── Start ──
   refresh();
   requestAnimationFrame(fit);
+  R.setAnimation(svg, animOn);
+  updateAnimButton();
   window.GP.editor = { get model() { return model; }, get plan() { return plan; }, refresh, fit };
 })();

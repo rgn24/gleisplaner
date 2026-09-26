@@ -27,21 +27,73 @@
     };
   }
 
-  // Fahrtrichtungs-Pfeile entlang einer Polylinie
-  function chevrons(parent, pts, cum, color, every) {
-    const total = cum[cum.length - 1];
-    if (total < 36) return;
-    const n = Math.max(1, Math.floor((total - 24) / every));
+  // ── Fahrtrichtungs-Pfeile: Ruhebild oder animiert ──
+  const SPEED = 42;          // Pfeil-Geschwindigkeit in Zeichen-Einheiten pro Sekunde
+  const BIDI_PERIOD = 6;     // eingleisig: alle 3 s Richtungswechsel
+  const EDGE = 12;           // Abstand der Pfeile zu den Gleisenden
+  const anim = { running: false, raf: 0, svg: null };
+
+  function chevronAt(pts, cum, s, dir) {
+    const { p, t } = G.pointAt(pts, cum, s);
+    const tt = dir < 0 ? G.mul(t, -1) : t;
+    const nr = G.right(tt);
+    const tip = G.add(p, G.mul(tt, 2.4)), back = G.sub(p, G.mul(tt, 2.4));
+    return `M${pt(G.add(back, G.mul(nr, 3)))}L${pt(tip)}L${pt(G.sub(back, G.mul(nr, 3)))}`;
+  }
+  // Ruhebild: gleichmäßig verteilt; eingleisige Stücke als Doppelpfeil ‹›
+  function staticChevrons(f) {
+    const total = f.cum[f.cum.length - 1];
+    if (total < 36) return '';
+    const n = Math.max(1, Math.floor((total - 24) / f.every));
     const step = total / (n + 1);
     let dd = '';
     for (let i = 1; i <= n; i++) {
-      const { p, t } = G.pointAt(pts, cum, i * step);
-      const nr = G.right(t);
-      const tip = G.add(p, G.mul(t, 2.4));
-      const back = G.sub(p, G.mul(t, 2.4));
-      dd += `M${pt(G.add(back, G.mul(nr, 3)))}L${pt(tip)}L${pt(G.sub(back, G.mul(nr, 3)))}`;
+      dd += f.kind === 'bidi'
+        ? chevronAt(f.pts, f.cum, i * step + 3.5, 1) + chevronAt(f.pts, f.cum, i * step - 3.5, -1)
+        : chevronAt(f.pts, f.cum, i * step, 1);
     }
-    el(parent, 'path', { d: dd, fill: 'none', stroke: color, 'stroke-width': 1.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+    return dd;
+  }
+  // Bewegtbild zum Zeitpunkt t: Pfeile wandern in Fahrtrichtung; eingleisig wechselt die Richtung,
+  // mit kurzem Aus- und Einblenden – wie Züge, die das Gleis abwechselnd nutzen
+  function applyMoving(f, t) {
+    const total = f.cum[f.cum.length - 1];
+    if (total < 36) return;
+    let dir = 1;
+    if (f.kind === 'bidi') {
+      const u = (t % BIDI_PERIOD) / BIDI_PERIOD;
+      dir = u < 0.5 ? 1 : -1;
+      const h = (u % 0.5) / 0.5;
+      f.path.setAttribute('opacity', Math.max(0, Math.min(1, h * 6, (1 - h) * 6)).toFixed(2));
+    }
+    const off = (((dir * t * SPEED) % f.every) + f.every) % f.every;
+    let dd = '';
+    for (let s = EDGE + off; s < total - EDGE; s += f.every) dd += chevronAt(f.pts, f.cum, s, dir);
+    f.path.setAttribute('d', dd);
+  }
+  function flow(svg, parent, pts, cum, color, every, kind, exporting) {
+    const f = { pts, cum, every, kind };
+    f.path = el(parent, 'path', { d: staticChevrons(f), fill: 'none', stroke: color, 'stroke-width': 1.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+    if (exporting) return;
+    svg.__flows.push(f);
+    if (anim.running && anim.svg === svg) applyMoving(f, performance.now() / 1000);   // kein Flackern beim Neuzeichnen
+  }
+  function setAnimation(svg, on) {
+    anim.svg = svg;
+    if (on && !anim.running) {
+      anim.running = true;
+      const tick = (now) => {
+        if (!anim.running) return;
+        const t = now / 1000;
+        for (const f of anim.svg.__flows || []) applyMoving(f, t);
+        anim.raf = requestAnimationFrame(tick);
+      };
+      anim.raf = requestAnimationFrame(tick);
+    } else if (!on && anim.running) {
+      anim.running = false;
+      cancelAnimationFrame(anim.raf);
+      for (const f of svg.__flows || []) { f.path.setAttribute('d', staticChevrons(f)); f.path.removeAttribute('opacity'); }
+    }
   }
 
   function offsetLine(pts, off) {
@@ -65,6 +117,7 @@
     const selConn = ui.sel && ui.sel.type === 'conn' ? ui.sel.id : null;
     const selStruct = ui.sel && ui.sel.type === 'struct' ? ui.sel.id : null;
     svg.textContent = '';
+    if (!exporting) svg.__flows = [];
     svg.setAttribute('font-family', T.font);
 
     const defs = el(svg, 'defs', {});
@@ -109,20 +162,20 @@
       for (const s of P.stubs) {
         const used = !s.lane || s.lane.strands.length || s.kind === 'single';
         el(gTrack, 'path', { d: d(s.pts), fill: 'none', stroke: T.track, 'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: used ? 1 : 0.35 });
-        if (s.kind !== 'single' && used) chevrons(gTrack, s.pts, G.cumulative(s.pts), T.bg, 46);
+        if (used) flow(svg, gTrack, s.pts, G.cumulative(s.pts), T.bg, 46, s.kind === 'single' ? 'bidi' : 'oneway', exporting);
       }
       for (const pr of P.presorts) for (const pair of pr.pairs) for (const sg of pair.segs) {
         el(gTrack, 'path', { d: d(sg), stroke: T.track, 'stroke-width': 2.2, 'stroke-linecap': 'round', 'data-presort': pr.node.id });
       }
       for (const st of P.stems) {
         el(gTrack, 'path', { d: d(st.pts), fill: 'none', stroke: T.track, 'stroke-width': 3.4, 'stroke-linecap': 'round', 'data-lane': st.lane.id });
-        chevrons(gTrack, st.pts, G.cumulative(st.pts), T.bg, 40);
+        flow(svg, gTrack, st.pts, G.cumulative(st.pts), T.bg, 40, 'oneway', exporting);
       }
       for (const s of P.strands) {
         const on = selConn === s.conn.id;
         el(gTrack, 'path', { d: d(s.path), fill: 'none', stroke: s.color, 'stroke-width': on ? 4.6 : 3.2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
           'data-conn': s.conn.id, 'data-strand': s.id, class: exporting ? null : 'strand' });
-        chevrons(gTrack, s.path, s.cum, T.bg, 110);
+        flow(svg, gTrack, s.path, s.cum, T.bg, 110, 'oneway', exporting);
       }
       // Brücken: oberes Gleis mit Umrandung über dem unteren
       for (const b of P.bridges) {
@@ -306,5 +359,5 @@
   }
 
   root.GP = root.GP || {};
-  root.GP.render = { render, highlight, theme, nodeHalfWidth };
+  root.GP.render = { render, highlight, theme, nodeHalfWidth, setAnimation };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

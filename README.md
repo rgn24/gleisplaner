@@ -13,7 +13,8 @@ welche Richtung steht**.
    1 Gleis = eingleisige Strecke.
 2. **Verbinden:** Anschluss anklicken und den „+“-Griff auf einen anderen Anschluss ziehen – oder in der
    Seitenleiste die Häkchen setzen. Jede Verbindung gilt in beide Richtungen.
-3. Der **Gleisplan** entsteht sofort. Pfeile zeigen die Fahrtrichtung, K-Schilder markieren Kreuzungen.
+3. Der **Gleisplan** entsteht sofort. Die Pfeile laufen animiert in Fahrtrichtung (auf eingleisigen Stücken
+   abwechselnd in beide Richtungen; ⏸ in der Werkzeugleiste hält sie an), K-Schilder markieren Kreuzungen.
 4. **Brücke oder ebenerdig** – auf drei Ebenen einstellbar, das Genauere gewinnt:
    - *Einstellungen → Kreuzungen (Standard)*: gilt für alle Verbindungen.
    - *Verbindung anklicken → Kreuzungen dieser Verbindung*: „Standard“, „Brücke/Tunnel“ oder „Ebenerdig“ für

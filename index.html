@@ -6,7 +6,7 @@
 <title>Gleisknoten-Planer</title>
 <meta name="description" content="Bahnknoten für Transport Fever planen: Gleisbelegung, Weichen, Brücken und Signalrichtungen.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231f2124'/%3E%3Cpath d='M5 22 C12 22 14 10 27 10 M5 10 C12 10 14 22 27 22' fill='none' stroke='%23f2c14e' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 <header class="bar">
@@ -29,6 +29,7 @@
       <button class="btn icon" id="btnUndo" title="Rückgängig (⌘Z)" aria-label="Rückgängig">↶</button>
       <button class="btn icon" id="btnRedo" title="Wiederholen (⇧⌘Z)" aria-label="Wiederholen">↷</button>
       <button class="btn icon" id="btnFit" title="Alles einpassen" aria-label="Einpassen">⤢</button>
+      <button class="btn icon" id="btnAnim" title="Pfeil-Animation anhalten" aria-label="Pfeil-Animation anhalten" aria-pressed="true">⏸</button>
     </div>
     <div class="menu">
       <button class="btn" id="btnMenu" aria-haspopup="true" aria-expanded="false">Datei ▾</button>
@@ -78,8 +79,9 @@
       <details class="legend">
         <summary>Legende</summary>
         <ul>
-          <li><svg viewBox="0 0 44 14"><path d="M2 7H42" stroke="#e2bd3a" stroke-width="3.2"/><path d="M18 4L22 7L18 10M30 4L34 7L30 10" stroke-width="1.5" fill="none" style="stroke:var(--bg)"/></svg>Einrichtungsgleis einer Verbindung, Pfeile = Fahrtrichtung</li>
+          <li><svg viewBox="0 0 44 14"><path d="M2 7H42" stroke="#e2bd3a" stroke-width="3.2"/><path d="M18 4L22 7L18 10M30 4L34 7L30 10" stroke-width="1.5" fill="none" style="stroke:var(--bg)"/></svg>Einrichtungsgleis einer Verbindung – die Pfeile laufen in Fahrtrichtung</li>
           <li><svg viewBox="0 0 44 14"><path d="M2 7H42" stroke-width="3.4" style="stroke:var(--track)"/></svg>Gemeinsames Gleis mehrerer Verbindungen / Strecke</li>
+          <li><svg viewBox="0 0 44 14"><path d="M2 7H42" stroke-width="3" style="stroke:var(--track)"/><path d="M13.5 4L16.5 7L13.5 10M11.5 4L8.5 7L11.5 10M33.5 4L36.5 7L33.5 10M31.5 4L28.5 7L31.5 10" stroke-width="1.5" fill="none" style="stroke:var(--bg)"/></svg>Eingleisig: beide Richtungen abwechselnd – die Pfeile wechseln die Richtung</li>
           <li><svg viewBox="0 0 44 14"><path d="M2 7H42" stroke-width="3" style="stroke:var(--track)"/><circle cx="22" cy="7" r="3.8" stroke-width="1.4" style="fill:var(--bg);stroke:var(--ink)"/></svg>W – Weiche</li>
           <li><svg viewBox="0 0 44 14"><path d="M22 0V14" stroke="#e5413b" stroke-width="3"/><path d="M8 7H36" stroke-width="11" style="stroke:var(--bg)"/><path d="M8 1.5H36M8 12.5H36" stroke-width="1.1" style="stroke:var(--muted)"/><path d="M8 7H36" stroke="#4fb3ea" stroke-width="3"/></svg>Brücke/Tunnel – kreuzungsfrei</li>
           <li><svg viewBox="0 0 44 14"><path d="M22 0V14M8 7H36" stroke-width="2.4" style="stroke:var(--track)"/><path d="M22 1L28 7L22 13L16 7Z" fill="none" stroke-width="1.8" style="stroke:var(--warn)"/></svg>Flachkreuzung – Konfliktpunkt</li>
@@ -100,10 +102,10 @@
 <input type="file" id="fileInput" accept=".json,application/json" hidden>
 <div class="toast" id="toast" role="status" hidden></div>
 
-<script src="js/geometry.js?v=2"></script>
-<script src="js/planner.js?v=2"></script>
-<script src="js/examples.js?v=2"></script>
-<script src="js/render.js?v=2"></script>
-<script src="js/editor.js?v=2"></script>
+<script src="js/geometry.js?v=3"></script>
+<script src="js/planner.js?v=3"></script>
+<script src="js/examples.js?v=3"></script>
+<script src="js/render.js?v=3"></script>
+<script src="js/editor.js?v=3"></script>
 </body>
 </html>
