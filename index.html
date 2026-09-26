@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gleisknoten-Planer</title>
+<meta name="description" content="Bahnknoten für Transport Fever planen: Gleisbelegung, Weichen, Brücken und Signalrichtungen.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231f2124'/%3E%3Cpath d='M5 22 C12 22 14 10 27 10 M5 10 C12 10 14 22 27 22' fill='none' stroke='%23f2c14e' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M4 22 C12 22 14 10 28 10 M4 10 C12 10 14 22 28 22" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+    <div>
+      <h1>Gleisknoten-Planer</h1>
+      <p>für Transport Fever · Gleise, Brücken &amp; Signale</p>
+    </div>
+  </div>
+  <nav class="tools" aria-label="Werkzeuge">
+    <button id="btnAdd" class="btn primary" title="Neuen Anschluss in die Mitte setzen (oder Doppelklick auf die Fläche)">＋ Anschluss</button>
+    <div class="seg" role="group" aria-label="Ebenen">
+      <button class="btn" data-layer="sketch" aria-pressed="true">Skizze</button>
+      <button class="btn" data-layer="tracks" aria-pressed="true">Gleise</button>
+      <button class="btn" data-layer="signals" aria-pressed="true">Signale</button>
+      <button class="btn" data-layer="labels" aria-pressed="true">Beschriftung</button>
+    </div>
+    <div class="seg" role="group" aria-label="Bearbeiten">
+      <button class="btn icon" id="btnUndo" title="Rückgängig (⌘Z)" aria-label="Rückgängig">↶</button>
+      <button class="btn icon" id="btnRedo" title="Wiederholen (⇧⌘Z)" aria-label="Wiederholen">↷</button>
+      <button class="btn icon" id="btnFit" title="Alles einpassen" aria-label="Einpassen">⤢</button>
+    </div>
+    <div class="menu">
+      <button class="btn" id="btnMenu" aria-haspopup="true" aria-expanded="false">Datei ▾</button>
+      <div class="menu-list" id="menuList" hidden>
+        <button data-act="example:skizze">Beispiel: Deine Skizze</button>
+        <button data-act="example:dreieck">Beispiel: Gleisdreieck</button>
+        <button data-act="new">Neuer, leerer Plan</button>
+        <hr>
+        <button data-act="save-json">Plan speichern (.json)</button>
+        <button data-act="load-json">Plan laden (.json) …</button>
+        <hr>
+        <button data-act="export-png">Als Bild speichern (.png)</button>
+        <button data-act="export-svg">Als Vektorgrafik speichern (.svg)</button>
+      </div>
+    </div>
+  </nav>
+</header>
+
+<main class="layout">
+  <section class="stage" aria-label="Zeichenfläche">
+    <svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Gleisplan"></svg>
+    <div class="stats" id="stats" aria-live="polite"></div>
+    <p class="hint" id="hint">Doppelklick: neuer Anschluss · Kasten ziehen: verschieben · „+“ auf anderen Anschluss ziehen: verbinden · Pfeil ziehen: drehen · K-Schild anklicken: Brücke/flach</p>
+  </section>
+
+  <aside class="side">
+    <section class="panel" id="panelSel" aria-label="Auswahl"></section>
+
+    <section class="panel">
+      <h2>Einstellungen</h2>
+      <div class="row">
+        <span>Betrieb</span>
+        <div class="seg small" role="group" aria-label="Betrieb">
+          <button class="btn" data-setting="traffic" data-value="right">Rechtsverkehr</button>
+          <button class="btn" data-setting="traffic" data-value="left">Linksverkehr</button>
+        </div>
+      </div>
+      <div class="row">
+        <span>Kreuzungen</span>
+        <div class="seg small" role="group" aria-label="Kreuzungen">
+          <button class="btn" data-setting="crossingDefault" data-value="bridge">Brücke/Tunnel</button>
+          <button class="btn" data-setting="crossingDefault" data-value="flat">Flach</button>
+        </div>
+      </div>
+      <button class="link" id="btnResetOverrides" hidden>Einzeln geänderte Kreuzungen zurücksetzen</button>
+      <details class="legend">
+        <summary>Legende</summary>
+        <ul>
+          <li><svg viewBox="0 0 44 14"><path d="M2 7H42" stroke="#e2bd3a" stroke-width="3.2"/><path d="M18 4L22 7L18 10M30 4L34 7L30 10" stroke-width="1.5" fill="none" style="stroke:var(--bg)"/></svg>Einrichtungsgleis einer Verbindung, Pfeile = Fahrtrichtung</li>
+          <li><svg viewBox="0 0 44 14"><path d="M2 7H42" stroke-width="3.4" style="stroke:var(--track)"/></svg>Gemeinsames Gleis mehrerer Verbindungen / Strecke</li>
+          <li><svg viewBox="0 0 44 14"><path d="M2 7H42" stroke-width="3" style="stroke:var(--track)"/><circle cx="22" cy="7" r="3.8" stroke-width="1.4" style="fill:var(--bg);stroke:var(--ink)"/></svg>W – Weiche</li>
+          <li><svg viewBox="0 0 44 14"><path d="M22 0V14" stroke="#e5413b" stroke-width="3"/><path d="M8 7H36" stroke-width="11" style="stroke:var(--bg)"/><path d="M8 1.5H36M8 12.5H36" stroke-width="1.1" style="stroke:var(--muted)"/><path d="M8 7H36" stroke="#4fb3ea" stroke-width="3"/></svg>Brücke/Tunnel – kreuzungsfrei</li>
+          <li><svg viewBox="0 0 44 14"><path d="M22 0V14M8 7H36" stroke-width="2.4" style="stroke:var(--track)"/><path d="M22 1L28 7L22 13L16 7Z" fill="none" stroke-width="1.8" style="stroke:var(--warn)"/></svg>Flachkreuzung – Konfliktpunkt</li>
+          <li><svg viewBox="0 0 44 14"><circle cx="22" cy="7" r="6" style="fill:var(--sig-e)"/><path d="M26 7L19.5 3.8V10.2Z" style="fill:var(--bg)"/></svg>E – Einfahrsignal (Pfeil = Fahrtrichtung, Einbahn: Ja)</li>
+          <li><svg viewBox="0 0 44 14"><circle cx="22" cy="7" r="6" style="fill:var(--sig-a)"/><path d="M26 7L19.5 3.8V10.2Z" style="fill:var(--bg)"/></svg>A – Ausfahrsignal, ≥ 1 Zuglänge hinter der letzten Weiche</li>
+          <li><svg viewBox="0 0 44 14"><circle cx="22" cy="7" r="5.6" stroke-width="1.8" stroke-dasharray="2.4 1.9" style="fill:var(--panel);stroke:var(--sig-z)"/><path d="M26 7L19.5 3.8V10.2Z" style="fill:var(--sig-z)"/></svg>Z – Wartesignal, nur wenn Platz für einen Zug</li>
+          <li><svg viewBox="0 0 44 14"><circle cx="22" cy="7" r="5.6" stroke-width="1.8" style="fill:var(--panel);stroke:var(--sig-e)"/><path d="M26 7L19.5 3.8V10.2Z" style="fill:var(--sig-e)"/></svg>Hohl = Einbahn: Nein (eingleisige Strecke)</li>
+        </ul>
+        <p class="fine">In Transport Fever 2 und 3 sind alle Signale Pfadsignale: grün, sobald der Weg des Zuges bis zum nächsten Signal frei ist. „Einbahn: Ja“ verhindert, dass Züge das Signal von hinten passieren.</p>
+      </details>
+    </section>
+
+    <section class="panel" id="panelGuide" aria-label="Bauanleitung"></section>
+    <section class="panel" id="panelNotes" aria-label="Hinweise"></section>
+  </aside>
+</main>
+
+<input type="file" id="fileInput" accept=".json,application/json" hidden>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="js/geometry.js?v=1"></script>
+<script src="js/planner.js?v=1"></script>
+<script src="js/examples.js?v=1"></script>
+<script src="js/render.js?v=1"></script>
+<script src="js/editor.js?v=1"></script>
+</body>
+</html>
