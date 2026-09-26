@@ -14,6 +14,7 @@
     GAP: 16,       // Mindestabstand hintereinanderliegender Weichenstraßen
     STEP: 12,      // Suchschritt beim Zusammenschieben
     XO: 44,        // Länge eines Gleiswechsels
+    XO_STEP: 54,   // Abstand der Gleiswechsel in der Leiter (≥ XO, sonst reißt die Kette)
     XO_GAP: 20,    // Gleiswechsel → erste Weiche
     SIG: 30,       // Einfahrsignal vor dem Gleiswechsel
     STAG: 18,      // Versatz der Signale benachbarter Gleise
@@ -58,10 +59,17 @@
       id: uid(p && p.id, 'p' + (i + 1)),
       type: p && p.type === 'G' ? 'G' : 'P',
       use: ['east', 'west', 'both'].includes(p && p.use) ? p.use : 'auto',
+      left: p && typeof p.left === 'string' ? p.left : 'auto',     // festes Streckengleis links (Gleis-ID) oder auto
+      right: p && typeof p.right === 'string' ? p.right : 'auto',
     }));
     for (const X of ['left', 'right']) {
       const t = src[X] && Array.isArray(src[X].tracks) ? src[X].tracks : [];
-      m[X] = { tracks: t.slice(0, 8).map((x, i) => ({ id: uid(x && x.id, X[0] + (i + 1)), type: ['P', 'G'].includes(x && x.type) ? x.type : 'PG' })) };
+      m[X] = { tracks: t.slice(0, 8).map((x, i) => ({ id: uid(x && x.id, X[0] + (i + 1)), type: ['P', 'G'].includes(x && x.type) ? x.type : 'PG' })),
+        xo: ['all', 'none'].includes(src[X] && src[X].xo) ? src[X].xo : 'auto' };   // Gleiswechsel vor dem Vorfeld
+    }
+    // feste Zuordnungen auf entfernte Streckengleise wieder automatisch
+    for (const p of m.platforms) for (const X of ['left', 'right']) {
+      if (p[X] !== 'auto' && !m[X].tracks.some(t => t.id === p[X])) p[X] = 'auto';
     }
     return m;
   }
@@ -115,6 +123,44 @@
     return row.use === 'west' ? 'in' : 'out';
   }
 
+  // Bahnsteiggleis hängt (fest gewählt) an einem Streckengleis der Gegenrichtung
+  function against(r, X) {
+    const c = category(r, X), l = r.at[X];
+    return !!l && c !== 'any' && c !== null && l.dir !== c;
+  }
+
+  // Gleiswechsel vor dem Vorfeld. „alle ↔ alle“: zwei gegenläufige Ketten einfacher Weichenverbindungen –
+  // abwärts (oberes → unteres Gleis) und aufwärts, jeweils in Fahrtrichtung zum Bahnhof nacheinander. So erreicht
+  // jedes Streckengleis jedes andere, in beide Richtungen, ohne Kreuzungsweichen. Gleiche Paare im selben
+  // Abschnitt werden zum gekreuzten Gleiswechsel zusammengefasst.
+  function planZone(S, X) {
+    const sd = S.sides[X], m = S.model;
+    const sorted = sd.lines.slice().sort((a, b) => a.y - b.y);
+    const hasAny = S.rows.some(r => r.at[X] && category(r, X) === 'any');
+    const anyAgainst = S.rows.some(r => against(r, X));
+    sd.hasAny = hasAny;
+    sd.zoneNeeded = hasAny || anyAgainst;
+    let lines = [];
+    if (m[X].xo === 'all') lines = sorted;
+    else if (m[X].xo === 'auto') {
+      if (sd.zoneNeeded) lines = sorted;
+      else {
+        // Vorsortieren: dieselben Züge können auf mehreren Einfahrgleisen kommen, die zu anderen Bahnsteigen führen
+        const ins = sorted.filter(l => l.dir === 'in');
+        const key = (l) => l.rows.map(r => r.id).sort().join(',');
+        const share = (a, b) => a.type === 'PG' || b.type === 'PG' || a.type === b.type;
+        const presort = ins.some((l, i) => i + 1 < ins.length && key(l) !== key(ins[i + 1]) && share(l, ins[i + 1]));
+        if (presort) lines = ins;
+      }
+    }
+    sd.zone = [];
+    const n = lines.length;
+    for (let p = 0; p + 1 < n; p++) sd.zone.push({ kind: 'down', p, a: lines[p], b: lines[p + 1], slot: p });
+    // Aufwärtskette in umgekehrter Reihenfolge; bei ungerader Gleiszahl um einen halben Abschnitt versetzt,
+    // sonst träfen sich zwei Gleiswechsel am selben Punkt eines Gleises
+    for (let p = 0; p + 1 < n; p++) sd.zone.push({ kind: 'up', p, a: lines[p], b: lines[p + 1], slot: n - 2 - p + (n % 2 ? 0.5 : 0) });
+  }
+
   // Schnittpunkte zweier Elementlisten (je Element ein gerades Stück), gemeinsame Weichenpunkte ausgenommen
   function crossingsBetween(A, B, collect) {
     let n = 0;
@@ -145,7 +191,7 @@
       const extUp = up.length ? (l.y - up[0].y) / C.SLOPE : 0;
       const extDown = down.length ? (down[down.length - 1].y - l.y) / C.SLOPE : 0;
       return { line: l, side: X, rows, up, down, level, extUp, extDown, ext: Math.max(extUp, extDown, 18), x0: 0,
-        bidi: rows.some(r => category(r, X) === 'any') };
+        bidi: rows.some(r => category(r, X) === 'any' || against(r, X)) };
     });
     const attach = (L, x0, r) => ({ x: x0 + Math.abs(r.y - L.line.y) / C.SLOPE, y: r.y });
     const elems = (L, x0, xFar) => {
@@ -193,8 +239,11 @@
       ladders.forEach(L => { L.x0 = best.x0.get(L); });
     }
     sd.xs = ladders.length ? Math.min(...ladders.map(L => L.x0)) : -C.MARGIN;   // Beginn des Vorfelds
+    planZone(S, X);
+    const zoneLen = sd.zone.length ? Math.max(...sd.zone.map(o => o.slot)) * C.XO_STEP + C.XO : 0;
     sd.xXo1 = sd.xs - C.XO_GAP;                  // Gleiswechsel innen
-    sd.xXo0 = sd.xXo1 - C.XO;                    // Gleiswechsel außen
+    sd.xXo0 = sd.xXo1 - zoneLen;                 // Gleiswechsel außen
+    sd.zone.forEach(o => { o.x = sd.xXo0 + o.slot * C.XO_STEP; });
     sd.xSig = sd.xXo0 - C.SIG;                   // Einfahrsignale
     sd.xSplit = sd.xSig - 30;                    // Spreizweiche eingleisiger Strecken
     sd.xFar = sd.xSig - C.STAG * sd.lines.length - 40 - C.STUB;
@@ -232,7 +281,8 @@
       if (S.kind === 'terminus') use = 'both';
       else if (S.kind === 'none') use = 'none';
       else if (use === 'auto') use = i < Math.floor(n / 2) ? top : i >= Math.ceil(n / 2) ? bottom : 'both';
-      return { id: p.id, idx: i, no: i + 1, type: p.type, set: p.use, use, y: i * C.ROW, at: { left: null, right: null } };
+      return { id: p.id, idx: i, no: i + 1, type: p.type, set: p.use, use, y: i * C.ROW,
+        at: { left: null, right: null }, pick: { left: p.left, right: p.right }, manual: { left: false, right: false } };
     });
 
     // 2) Streckengleise: in Fahrtrichtung zum Bahnhof rechts liegen die Einfahrgleise
@@ -258,12 +308,21 @@
       const sd = S.sides[X];
       if (!sd.lines.length) continue;
       const need = S.rows.filter(r => category(r, X));
-      const res = assign(need, sd.lines, (r, l) => {
+      // Fest gewählte Streckengleise gelten – auch gegen Richtung oder Zugart (dann mit Hinweis)
+      const fixed = new Map();
+      for (const r of need) {
+        if (r.pick[X] === 'auto') continue;
+        const cand = sd.lines.filter(l => l.trackId === r.pick[X]);
+        const c = category(r, X);
+        if (cand.length) fixed.set(r, cand.find(l => c === 'any' || l.dir === c) || cand[0]);
+      }
+      const res = assign(need.filter(r => !fixed.has(r)), sd.lines, (r, l) => {
         const c = category(r, X);
         return (c === 'any' || l.dir === c) && (l.type === 'PG' || l.type === r.type);
       });
       sd.monotone = res.monotone;
       sd.missing = res.missing;
+      for (const [r, l] of fixed) { r.at[X] = l; r.manual[X] = true; l.rows.push(r); }
       for (const [r, l] of res.map) { r.at[X] = l; l.rows.push(r); }
     }
 
@@ -302,8 +361,7 @@
     for (const X of ['left', 'right']) {
       const sd = S.sides[X];
       if (!sd.lines.length) continue;
-      const hasAny = S.rows.some(r => r.at[X] && category(r, X) === 'any');
-      sd.hasAny = hasAny;
+      const hasAny = sd.zoneNeeded;
       const start = sd.single ? sd.xSplit + 24 : sd.xFar;
       for (const l of sd.lines) {
         const L = sd.ladders.find(q => q.line === l);
@@ -314,8 +372,9 @@
           return pts;
         };
         const color = TYPE_COLOR[l.type] || null, ref = `line:${X}:${l.id}`;
-        S.paths.push({ kind: 'line', line: l, side: X, pts: part(start, sd.xXo0 - 8), dir: 'one', color, ref, unused: !L });
-        S.paths.push({ kind: 'line', line: l, side: X, pts: part(sd.xXo0 - 8, xEnd), dir: hasAny ? 'both' : 'one', color, ref, unused: !L });
+        const unused = !L && !sd.zone.some(o => o.a === l || o.b === l);   // über die Gleiswechsel erreichbar = genutzt
+        S.paths.push({ kind: 'line', line: l, side: X, pts: part(start, sd.xXo0 - 8), dir: 'one', color, ref, unused });
+        S.paths.push({ kind: 'line', line: l, side: X, pts: part(sd.xXo0 - 8, xEnd), dir: hasAny ? 'both' : 'one', color, ref, unused });
       }
       if (sd.single) {
         const col = TYPE_COLOR[sd.lines[0].type] || null, ref = `line:${X}:${sd.lines[0].trackId}`;
@@ -339,22 +398,28 @@
             ref: `line:${X}:${L.line.id}` });
         }
       }
-      // Gekreuzte Gleiswechsel vor dem Vorfeld: Kopfbahnhof/beidseitige Gleise, oder Vorsortieren der Einfahrten
-      const sorted = sd.lines.slice().sort((a, b) => a.y - b.y);
-      const key = (l) => l.rows.map(r => r.id).join(',');
-      const shareTrains = (a, b) => a.type === 'PG' || b.type === 'PG' || a.type === b.type;
-      for (let i = 0; i + 1 < sorted.length; i++) {
-        const a = sorted[i], b = sorted[i + 1];
-        // Vorsortieren nur, wenn dieselben Züge auf beiden Einfahrgleisen kommen können, aber andere Ziele haben
-        if (!(hasAny || (a.dir === 'in' && b.dir === 'in' && key(a) !== key(b) && shareTrains(a, b)))) continue;
-        const segs = [[{ x: sd.xXo0, y: a.y }, { x: sd.xXo1, y: b.y }], [{ x: sd.xXo0, y: b.y }, { x: sd.xXo1, y: a.y }]].map(s => s.map(p => gp(X, p)));
-        S.crossovers.push({ side: X, a, b, segs, center: gp(X, { x: (sd.xXo0 + sd.xXo1) / 2, y: (a.y + b.y) / 2 }) });
+      // Gleiswechsel-Leiter: je Paar und Abschnitt ein einfacher oder gekreuzter Gleiswechsel
+      const bySlot = new Map();
+      for (const o of sd.zone) {
+        const k = `${o.p}@${o.slot}`;
+        if (!bySlot.has(k)) bySlot.set(k, []);
+        bySlot.get(k).push(o);
+      }
+      for (const group of bySlot.values()) {
+        const { a, b, x } = group[0];
+        const segs = group.map(o => (o.kind === 'down'
+          ? [{ x, y: a.y }, { x: x + C.XO, y: b.y }]
+          : [{ x, y: b.y }, { x: x + C.XO, y: a.y }]).map(q => gp(X, q)));
+        S.crossovers.push({ side: X, a, b, segs, scissors: group.length > 1, center: gp(X, { x: x + C.XO / 2, y: (a.y + b.y) / 2 }) });
       }
       // Weichen: Spreizweiche, Gleiswechsel, dann die Weichenstraßen von außen nach innen
       const sw = (p, text, kind, weichen) => S.switches.push({ side: X, p, text, kind, weichen });
       if (sd.single) sw(gp(X, { x: sd.xSplit, y: S.yc }), `${SIDE_NAME[X]}: Spreizweiche – die eingleisige Strecke teilt sich in Ein- und Ausfahrgleis`, 'split', 1);
-      for (const c of S.crossovers.filter(q => q.side === X)) {
-        sw(c.center, `${SIDE_NAME[X]}: gekreuzter Gleiswechsel ${c.a.name} ↔ ${c.b.name} (4 Weichen)`, 'crossover', 4);
+      const xo = S.crossovers.filter(q => q.side === X);
+      const ladder = xo.length > 1 ? ' – Teil der Gleiswechsel-Leiter' : '';
+      for (const c of xo) {
+        sw(c.center, c.scissors ? `${SIDE_NAME[X]}: gekreuzter Gleiswechsel ${c.a.name} ↔ ${c.b.name} (4 Weichen)${ladder}`
+          : `${SIDE_NAME[X]}: Gleiswechsel ${c.a.name} ↔ ${c.b.name} (2 Weichen)${ladder}`, 'crossover', c.scissors ? 4 : 2);
       }
       for (const L of sd.ladders.slice().sort((a, b) => a.x0 - b.x0)) {
         const nos = (g) => g.map(r => r.no).join(', ');
@@ -409,15 +474,15 @@
     S.signals.forEach(sg => { sg.label = sg.kind + (++cnt[sg.kind]); });
 
     const g = S.guide;
-    const lineName = (l) => (l ? l.name : '–');
+    const lineName = (l, r, X) => (l ? l.name + (r && r.manual[X] ? ' (fest)' : '') : '–');
     g.rows = S.rows.map(r => {
       let sub;
-      if (r.use === 'east') sub = `Einfahrt links über ${lineName(r.at.left)} · Ausfahrt rechts über ${lineName(r.at.right)}`;
-      else if (r.use === 'west') sub = `Einfahrt rechts über ${lineName(r.at.right)} · Ausfahrt links über ${lineName(r.at.left)}`;
+      if (r.use === 'east') sub = `Einfahrt links über ${lineName(r.at.left, r, 'left')} · Ausfahrt rechts über ${lineName(r.at.right, r, 'right')}`;
+      else if (r.use === 'west') sub = `Einfahrt rechts über ${lineName(r.at.right, r, 'right')} · Ausfahrt links über ${lineName(r.at.left, r, 'left')}`;
       else if (r.use === 'both' && S.kind === 'terminus') {
         const X = r.at.left ? 'left' : 'right';
-        sub = `Ein- und Ausfahrt ${SIDE_NAME[X]} über ${lineName(r.at[X])}, Züge wenden`;
-      } else if (r.use === 'both') sub = `links über ${lineName(r.at.left)} · rechts über ${lineName(r.at.right)}`;
+        sub = `Ein- und Ausfahrt ${SIDE_NAME[X]} über ${lineName(r.at[X], r, X)}, Züge wenden`;
+      } else if (r.use === 'both') sub = `links über ${lineName(r.at.left, r, 'left')} · rechts über ${lineName(r.at.right, r, 'right')}`;
       else sub = 'noch keine Streckengleise';
       return { ref: `row:${r.id}`, colors: [TYPE_COLOR[r.type]], title: `Gleis ${r.no} · ${TYPE_NAME[r.type]} · ${USE_NAME[r.use]}${r.set === 'auto' ? '' : ' (fest)'}`, text: sub };
     });
@@ -482,17 +547,35 @@
     const add = (level, text, refs) => { if (!seen.has(text)) { seen.add(text); S.notes.push({ level, text, refs: refs || [] }); } };
     if (!S.rows.length) add('info', 'Noch keine Bahnsteiggleise – links unter „Bahnsteiggleise“ Personen- oder Gütergleise anlegen.');
     if (S.kind === 'none' && S.rows.length) add('info', 'Noch keine Streckengleise – links und/oder rechts Gleise anlegen. Nur eine Seite = Kopfbahnhof.');
-    if (S.kind === 'terminus') add('info', 'Kopfbahnhof: Züge wenden am Bahnsteig. Alle Bahnsteiggleise werden in beide Richtungen genutzt; der gekreuzte Gleiswechsel vor dem Vorfeld lässt jeden Zug jedes Gleis erreichen.', S.crossovers.map(c => S.switches.find(w => w.kind === 'crossover' && w.p === c.center)).filter(Boolean).map(w => w.label));
+    const xoLabels = (X) => S.switches.filter(w => w.kind === 'crossover' && (!X || w.side === X)).map(w => w.label);
+    if (S.kind === 'terminus') add('info', 'Kopfbahnhof: Züge wenden am Bahnsteig. Alle Bahnsteiggleise werden in beide Richtungen genutzt; die Gleiswechsel vor dem Vorfeld lassen jedes Streckengleis jedes andere erreichen.', xoLabels());
     for (const X of ['left', 'right']) {
       const sd = S.sides[X];
       for (const r of sd.missing) {
         const cat = category(r, X);
         add('error', `Gleis ${r.no} (${TYPE_NAME[r.type]}, ${USE_NAME[r.use]}) findet ${SIDE_NAME[X]} kein passendes ${cat === 'in' ? 'Einfahrgleis' : cat === 'out' ? 'Ausfahrgleis' : 'Streckengleis'} – dort ein Streckengleis auf „${TYPE_SHORT[r.type]}“ oder „P+G“ stellen.`, [`row:${r.id}`]);
       }
+      // fest gewählte Streckengleise: Zugart und Richtung prüfen
+      for (const r of S.rows) {
+        if (!r.manual[X]) continue;
+        const l = r.at[X], c = category(r, X);
+        const refs = [`row:${r.id}`, `line:${X}:${l.id}`];
+        if (!(l.type === 'PG' || l.type === r.type)) {
+          add('warn', `Gleis ${r.no} (${TYPE_NAME[r.type]}) hängt ${SIDE_NAME[X]} fest an ${l.name} (nur ${TYPE_NAME[l.type]}) – dort kommen keine ${r.type === 'G' ? 'Güterzüge' : 'Personenzüge'} an, außer über den Gleiswechsel.`, refs);
+        }
+        if (against(r, X)) {
+          add(sd.zone.length ? 'info' : 'warn', sd.zone.length
+            ? `Gleis ${r.no}: ${c === 'in' ? 'Einfahrten' : 'Ausfahrten'} ${SIDE_NAME[X]} laufen fest über ${l.name}, eigentlich ein ${l.dir === 'in' ? 'Einfahr' : 'Ausfahr'}gleis – die Züge wechseln im Gleiswechsel vor dem Vorfeld und fahren bis zum Bahnsteig gegen die Regelrichtung.`
+            : `Gleis ${r.no}: ${l.name} ist ein ${l.dir === 'in' ? 'Einfahr' : 'Ausfahr'}gleis – ohne Gleiswechsel kommen die Züge dort nicht hin. „Gleiswechsel“ ${SIDE_NAME[X]} auf „auto“ oder „alle ↔ alle“ stellen.`, refs);
+        }
+      }
+      if (S.model[X].xo === 'none' && sd.zoneNeeded) {
+        add('warn', `${SIDE_NAME[X][0].toUpperCase() + SIDE_NAME[X].slice(1)} sind die Gleiswechsel abgeschaltet, obwohl Gleise in beide Richtungen oder gegen die Regelrichtung genutzt werden – so erreichen nicht alle Züge ihr Gleis.`, sd.lines.map(l => `line:${X}:${l.id}`));
+      }
       if (!sd.monotone) add('warn', `${SIDE_NAME[X][0].toUpperCase() + SIDE_NAME[X].slice(1)} passen Lage und Zugarten nicht zusammen – deshalb kreuzen sich Weichenstraßen. Tipp: Bahnsteiggleise so sortieren, dass sie neben den passenden Streckengleisen liegen (z. B. Güter außen).`, sd.lines.map(l => `line:${X}:${l.id}`));
       const ks = S.crossings.filter(c => c.side === X);
       if (ks.length) add('warn', `${SIDE_NAME[X][0].toUpperCase() + SIDE_NAME[X].slice(1)} ${ks.length === 1 ? 'kreuzt sich eine Weichenstraße' : `kreuzen sich Weichenstraßen ${ks.length}-mal`} ebenerdig (${ks.map(c => c.label).join(', ')}) – Züge müssen sich dort abwechseln.`, ks.map(c => c.label));
-      const idle = sd.lines.filter(l => !l.rows.length && !sd.hasAny);
+      const idle = sd.lines.filter(l => !l.rows.length && !sd.zone.some(o => o.a === l || o.b === l));
       if (idle.length && sd.ladders.length) add('info', `${listDe(idle.map(l => l.name))} ${idle.length > 1 ? 'werden' : 'wird'} nicht genutzt – keine passenden Bahnsteiggleise.`, idle.map(l => `line:${X}:${l.id}`));
     }
     if (S.kind === 'through') {

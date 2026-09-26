@@ -166,6 +166,19 @@
       const useSel = `<select data-ruse="${esc(p.id)}" aria-label="Richtung Gleis ${i + 1}" ${terminus ? 'disabled title="Kopfbahnhof: alle Gleise in beide Richtungen"' : ''}>
         ${[['auto', `auto${autoTxt ? ` (${autoTxt.split(' ')[0]})` : ''}`], ['east', '→ rechts'], ['west', '← links'], ['both', '⇄ beide']].map(([v, t]) =>
           `<option value="${v}" ${p.use === v ? 'selected' : ''}>${t}</option>`).join('')}</select>`;
+      // feste Zuordnung je Seite: „auto“ oder ein bestimmtes Streckengleis
+      const pick = (X) => {
+        const tracks = model[X].tracks;
+        if (!tracks.length || !r || !ST.category(r, X)) return '';
+        const autoName = r.at[X] && !r.manual[X] ? r.at[X].name : '';
+        const cur = p[X] || 'auto';
+        return `<label class="pick">${X === 'left' ? 'links' : 'rechts'}
+          <select data-rpick="${esc(p.id)}" data-side="${X}" aria-label="Gleis ${i + 1}: Streckengleis ${X === 'left' ? 'links' : 'rechts'}">
+            <option value="auto" ${cur === 'auto' ? 'selected' : ''}>auto${autoName ? ` (${autoName})` : ''}</option>
+            ${tracks.map((t, j) => `<option value="${esc(t.id)}" ${cur === t.id ? 'selected' : ''}>${X === 'left' ? 'L' : 'R'}${j + 1} · ${ST.TYPE_SHORT[t.type]}</option>`).join('')}
+          </select></label>`;
+      };
+      const picks = pick('left') + pick('right');
       return `<li class="prow" data-ref="row:${esc(p.id)}"><span class="no">${i + 1}</span>
         <button class="btn typebtn" data-rtype="${esc(p.id)}" data-v="${p.type === 'P' ? 'G' : 'P'}" title="Zugart umschalten (Personen/Güter)">
           <span class="dot" style="background:${ST.TYPE_COLOR[p.type]}"></span>${ST.TYPE_NAME[p.type]}</button>
@@ -174,7 +187,7 @@
           <button class="btn" data-rmove="${esc(p.id)}" data-d="-1" title="nach oben" aria-label="Gleis ${i + 1} nach oben" ${i === 0 ? 'disabled' : ''}>↑</button>
           <button class="btn" data-rmove="${esc(p.id)}" data-d="1" title="nach unten" aria-label="Gleis ${i + 1} nach unten" ${i === model.platforms.length - 1 ? 'disabled' : ''}>↓</button>
           <button class="btn" data-rdel="${esc(p.id)}" title="entfernen" aria-label="Gleis ${i + 1} entfernen">✕</button>
-        </span></li>`;
+        </span>${picks ? `<div class="picks">${picks}</div>` : ''}</li>`;
     }).join('');
     const sideHtml = (X) => {
       const tracks = model[X].tracks, sd = plan.sides[X];
@@ -189,7 +202,12 @@
           <button class="btn icon" data-lstep="${X}" data-d="-1" aria-label="Weniger Gleise ${X === 'left' ? 'links' : 'rechts'}" ${tracks.length ? '' : 'disabled'}>−</button>
           <output>${tracks.length}</output>
           <button class="btn icon" data-lstep="${X}" data-d="1" aria-label="Mehr Gleise ${X === 'left' ? 'links' : 'rechts'}" ${tracks.length >= 8 ? 'disabled' : ''}>+</button></div></div>
-        ${list ? `<ul class="plines">${list}</ul>` : ''}`;
+        ${list ? `<ul class="plines">${list}</ul>` : ''}
+        ${tracks.length ? `<div class="row"><span>Gleiswechsel ${X === 'left' ? 'links' : 'rechts'}</span>
+          <select data-xo="${X}" aria-label="Gleiswechsel ${X === 'left' ? 'links' : 'rechts'}">
+            ${[['auto', `auto${sd.zone && sd.zone.length ? (sd.zone.length > 2 ? ' (alle ↔ alle)' : ' (gekreuzt)') : ' (keine nötig)'}`], ['all', 'alle ↔ alle'], ['none', 'keine']].map(([v, t]) =>
+              `<option value="${v}" ${model[X].xo === v ? 'selected' : ''}>${t}</option>`).join('')}
+          </select></div>` : ''}`;
     };
     return `<h2>Bahnhof</h2>
       <div class="row"><input type="text" id="fName" value="${esc(model.name)}" maxlength="40" aria-label="Name des Bahnhofs"></div>
@@ -202,7 +220,8 @@
       <p class="fine">Richtung „auto“: beim Durchgangsbahnhof obere Hälfte ${plan.side > 0 ? 'nach links, untere nach rechts' : 'nach rechts, untere nach links'} – so kreuzen sich die Fahrten im Vorfeld nicht.</p>
       <h3>Streckengleise</h3>
       ${sideHtml('left')}${sideHtml('right')}
-      <p class="fine">Nur eine Seite = Kopfbahnhof, 1 Gleis = eingleisige Strecke. Rein/raus ergibt sich aus dem ${plan.side > 0 ? 'Rechts' : 'Links'}verkehr.</p>`;
+      <p class="fine">Nur eine Seite = Kopfbahnhof, 1 Gleis = eingleisige Strecke. Rein/raus ergibt sich aus dem ${plan.side > 0 ? 'Rechts' : 'Links'}verkehr.
+        Bei jedem Bahnsteiggleis lässt sich unter „links/rechts“ ein bestimmtes Streckengleis festlegen; „alle ↔ alle“ verbindet vor dem Vorfeld jedes Streckengleis mit jedem.</p>`;
   }
 
   function guideHtml(P) {
@@ -265,6 +284,12 @@
     } else if (t.dataset.ruse) {
       const id = t.dataset.ruse;
       commit(() => { model.platforms.find(p => p.id === id).use = t.value; });
+    } else if (t.dataset.rpick) {
+      const id = t.dataset.rpick, X = t.dataset.side;
+      commit(() => { model.platforms.find(p => p.id === id)[X] = t.value; });
+    } else if (t.dataset.xo) {
+      const X = t.dataset.xo;
+      commit(() => { model[X].xo = t.value; });
     }
   });
   panel.addEventListener('click', (ev) => {

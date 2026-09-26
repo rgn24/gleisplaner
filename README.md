@@ -39,10 +39,15 @@ Zweiter Planer unter **„Bahnhof“** (https://rgn24.github.io/gleisplaner/bahn
    → / ← / ⇄ festlegen.
 2. **Streckengleise** links und rechts: Anzahl und Zugart (P, G oder P+G). Nur eine Seite = Kopfbahnhof,
    1 Gleis = eingleisige Strecke. Rein/raus ergibt sich aus dem Rechts- bzw. Linksverkehr.
-3. Der Planer ordnet jedem Bahnsteiggleis passende Streckengleise zu (obere zu oberen, damit nichts kreuzt),
-   baut daraus **Weichenstraßen**, setzt bei Bedarf **gekreuzte Gleiswechsel** (Kopfbahnhof, Vorsortieren) und
-   **Signale**: E vor dem Vorfeld, A am Bahnsteigende, B auf der Strecke hinter der letzten Weiche.
-4. Wo sich Weichenstraßen doch kreuzen müssen (Zugarten liegen „falsch herum“), zeigt er die Flachkreuzung
+3. Der Planer ordnet jedem Bahnsteiggleis passende Streckengleise zu (obere zu oberen, damit nichts kreuzt) und
+   baut daraus **Weichenstraßen**. Bei jedem Bahnsteiggleis lässt sich unter „links/rechts“ auch ein bestimmtes
+   Streckengleis **fest** wählen (z. B. Gleis 1 an L4) – nötige Kreuzungen und Fahrten gegen die Regelrichtung
+   werden gezeigt und erklärt.
+4. **Gleiswechsel** vor dem Vorfeld je Seite: „auto“ (nur wo nötig), „alle ↔ alle“ oder „keine“. „Alle ↔ alle“
+   ist eine Leiter aus zwei gegenläufigen Ketten einfacher Gleiswechsel – jedes Streckengleis erreicht jedes andere,
+   in beide Richtungen, ohne Kreuzungsweichen. Dazu **Signale**: E vor dem Vorfeld, A am Bahnsteigende, B auf der
+   Strecke hinter der letzten Weiche.
+5. Wo sich Weichenstraßen doch kreuzen müssen (Zugarten liegen „falsch herum“), zeigt er die Flachkreuzung
    und einen Tipp, wie man die Gleise besser sortiert.
 
 ## Signalregeln

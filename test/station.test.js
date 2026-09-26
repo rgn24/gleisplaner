@@ -104,6 +104,67 @@ test('Zufallsbahnhöfe: jede Verbindung da oder gemeldet, keine Abstürze', () =
   }
 });
 
+// Welche Streckengleise erreicht ein Zug über die Gleiswechsel (in Fahrtrichtung nacheinander)?
+function reach(sd, inward) {
+  const edges = sd.zone.map(o => ({ outer: o.kind === 'down' ? o.a : o.b, inner: o.kind === 'down' ? o.b : o.a, x0: o.x, x1: o.x + ST.C.XO }));
+  const out = new Map();
+  for (const start of sd.lines) {
+    const seen = new Set([start.id]);
+    const queue = [{ l: start, x: inward ? -Infinity : Infinity }];
+    while (queue.length) {
+      const { l, x } = queue.shift();
+      for (const e of edges) {
+        if (inward && e.outer === l && e.x0 >= x - 1e-6) { seen.add(e.inner.id); queue.push({ l: e.inner, x: e.x1 }); }
+        if (!inward && e.inner === l && e.x1 <= x + 1e-6) { seen.add(e.outer.id); queue.push({ l: e.outer, x: e.x0 }); }
+      }
+    }
+    out.set(start.id, seen);
+  }
+  return out;
+}
+
+test('Gleiswechsel „alle ↔ alle“: jedes Streckengleis erreicht jedes andere, in beide Richtungen', () => {
+  for (const k of [2, 3, 4, 6]) {
+    const m = ST.normalizeStation({ platforms: [{ type: 'P' }, { type: 'P' }, { type: 'P' }],
+      left: { tracks: Array.from({ length: k }, () => ({ type: 'PG' })), xo: 'all' }, right: { tracks: [{ type: 'PG' }, { type: 'PG' }] } });
+    const sd = ST.plan(m).sides.left;
+    // baubar: nie zwei Weichen am selben Punkt eines Gleises
+    const pts = sd.zone.flatMap(o => [[o.kind === 'down' ? o.a : o.b, o.x], [o.kind === 'down' ? o.b : o.a, o.x + ST.C.XO]]);
+    for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
+      if (pts[i][0] === pts[j][0] && Math.abs(pts[i][1] - pts[j][1]) < 5) assert.fail(`${k} Gleise: zwei Weichen am selben Punkt von ${pts[i][0].name}`);
+    }
+    for (const inward of [true, false]) {
+      for (const [id, seen] of reach(sd, inward)) assert.equal(seen.size, k, `${k} Gleise, ${inward ? 'einwärts' : 'auswärts'} ab ${id}`);
+    }
+  }
+});
+
+test('Kopfbahnhof mit 4 Streckengleisen: automatisch volle Gleiswechsel-Leiter', () => {
+  const m = ST.example('kopf');
+  m.left.tracks = [{ type: 'PG' }, { type: 'PG' }, { type: 'PG' }, { type: 'PG' }];
+  const S = ST.plan(m);
+  for (const [, seen] of reach(S.sides.left, true)) assert.equal(seen.size, 4);
+  assert.equal(S.stats.crossings, 0);
+});
+
+test('Feste Zuordnung: Gleis 1 hängt links an L4', () => {
+  const m = ST.example('durchgang');
+  m.platforms[0].left = m.left.tracks[3].id;
+  const S = ST.plan(m);
+  assert.equal(S.rows[0].at.left.name, 'L4');
+  assert.ok(S.rows[0].manual.left);
+  assert.ok(!S.rows[1].manual.left, 'die anderen bleiben automatisch');
+  assert.ok(S.sides.left.zone.length > 0, 'Gleiswechsel, damit Ausfahrten auf ihr Streckengleis kommen');
+  assert.ok(S.notes.some(n => n.text.includes('Gleis 1') && n.text.includes('L4')));
+  assert.ok(S.guide.rows[0].text.includes('L4 (fest)'));
+  m.left.xo = 'none';
+  const T = ST.plan(m);
+  assert.equal(T.sides.left.zone.length, 0);
+  assert.ok(T.notes.some(n => n.level === 'warn' && n.text.includes('ohne Gleiswechsel')));
+  m.left.tracks.pop();                                     // L4 entfernt → wieder automatisch
+  assert.equal(ST.normalizeStation(m).platforms[0].left, 'auto');
+});
+
 test('normalizeStation: Grenzen und Standardwerte', () => {
   const m = ST.normalizeStation({ platforms: Array.from({ length: 30 }, () => ({ type: 'X' })), left: { tracks: [{ type: 'Q' }] } });
   assert.equal(m.platforms.length, 16);
