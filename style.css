@@ -69,6 +69,23 @@ button { font: inherit; color: inherit; }
 .brand h1 { font-size: 17px; font-weight: 750; letter-spacing: -0.01em; }
 .brand p { font-size: 12px; color: var(--muted); }
 .tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.modes { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; margin-left: 8px; }
+.modes a { color: var(--muted); text-decoration: none; padding: 4px 12px; border-radius: 7px; font-weight: 650; font-size: 13px; }
+.modes a:hover { color: var(--ink); }
+.modes a[aria-current="page"] { background: var(--accent); color: var(--accent-ink); }
+
+/* Bahnhofsplaner: Listen in der Seitenleiste */
+.prows, .plines { list-style: none; display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.prow, .pline { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 8px; flex-wrap: wrap; }
+.prow:hover, .prow.hl, .pline:hover, .pline.hl { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.prow .no, .pline .no { min-width: 24px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.prow select { padding: 3px 4px; font-size: 12.5px; max-width: 112px; }
+.typebtn { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; font-size: 12.5px; min-width: 92px; }
+.rowbtns { display: inline-flex; gap: 2px; margin-left: auto; }
+.rowbtns .btn { padding: 2px 7px; font-size: 12px; min-width: 0; }
+.dirtag { font-size: 11.5px; color: var(--muted); min-width: 52px; }
+.flash { animation: flash 1s ease-out; }
+@keyframes flash { 0% { background: color-mix(in srgb, var(--accent) 40%, transparent); } 100% { background: transparent; } }
 
 .btn {
   border: 1px solid var(--line);

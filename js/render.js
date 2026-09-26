@@ -372,5 +372,9 @@
   }
 
   root.GP = root.GP || {};
-  root.GP.render = { render, highlight, theme, nodeHalfWidth, setAnimation };
+  // Bausteine für andere Planer (Bahnhof) – gleiche Optik, gleiche Pfeil-Animation
+  const util = { el, f, pt, d, halo, theme, offsetLine,
+    flow: (svg, parent, pts, cum, color, every, kind, exporting) => flow(svg, parent, pts, cum, color, every, kind, exporting),
+    resetFlows: (svg) => { svg.__flows = []; } };
+  root.GP.render = { render, highlight, theme, nodeHalfWidth, setAnimation, util };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

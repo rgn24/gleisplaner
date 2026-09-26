@@ -28,6 +28,22 @@ welche Richtung steht**.
 6. „Datei“: Beispiel laden, Plan als JSON speichern/laden, als PNG/SVG exportieren. Der aktuelle Plan wird
    automatisch im Browser gespeichert.
 
+## Bahnhofsplaner
+
+Zweiter Planer unter **„Bahnhof“** (https://rgn24.github.io/gleisplaner/bahnhof.html):
+
+1. **Bahnsteiggleise** von oben nach unten anlegen und je Gleis die Zugart wählen (Personen/Güter).
+   Richtung „auto“: beim Durchgangsbahnhof fährt die obere Hälfte nach links, die untere nach rechts
+   (Rechtsverkehr) – so kreuzen sich Ein- und Ausfahrten im Vorfeld nicht. Einzelne Gleise lassen sich auf
+   → / ← / ⇄ festlegen.
+2. **Streckengleise** links und rechts: Anzahl und Zugart (P, G oder P+G). Nur eine Seite = Kopfbahnhof,
+   1 Gleis = eingleisige Strecke. Rein/raus ergibt sich aus dem Rechts- bzw. Linksverkehr.
+3. Der Planer ordnet jedem Bahnsteiggleis passende Streckengleise zu (obere zu oberen, damit nichts kreuzt),
+   baut daraus **Weichenstraßen**, setzt bei Bedarf **gekreuzte Gleiswechsel** (Kopfbahnhof, Vorsortieren) und
+   **Signale**: E vor dem Vorfeld, A am Bahnsteigende, B auf der Strecke hinter der letzten Weiche.
+4. Wo sich Weichenstraßen doch kreuzen müssen (Zugarten liegen „falsch herum“), zeigt er die Flachkreuzung
+   und einen Tipp, wie man die Gleise besser sortiert.
+
 ## Signalregeln
 
 In Transport Fever 2 und 3 sind alle Signale Pfadsignale (grün, sobald der Weg des Zuges bis zum nächsten Signal
@@ -56,5 +72,7 @@ python3 -m http.server 4174   # Vorschau unter http://localhost:4174
 node --test                   # Tests der Planungslogik
 ```
 
-`js/planner.js` (Logik) und `js/geometry.js` sind DOM-frei und laufen auch unter Node. Deploy: Push auf `main`
+`js/planner.js` (Knoten), `js/station.js` (Bahnhof) und `js/geometry.js` sind DOM-frei und laufen auch unter
+Node. Bei jeder Veröffentlichung in `index.html` und `bahnhof.html` die `?v=N` der Skripte hochzählen – die Seite
+erkennt neue Versionen dann selbst. Deploy: Push auf `main`
 (GitHub Pages).

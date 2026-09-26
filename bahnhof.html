@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bahnhofsplaner</title>
+<meta name="description" content="Bahnhöfe für Transport Fever planen: Bahnsteiggleise nach Zugart, saubere Weichenstraßen und Signale.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231f2124'/%3E%3Cpath d='M4 16H10L14 9H28M10 16H28M10 16L14 23H28' fill='none' stroke='%23f2c14e' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css?v=6">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M3 16H9L13 9H29M9 16H29M9 16L13 23H29" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div>
+      <h1>Bahnhofsplaner</h1>
+      <p>für Transport Fever · Weichenstraßen &amp; Signale · <span data-version></span></p>
+    </div>
+    <nav class="modes" aria-label="Planer"><a href="./">Knoten</a><a href="bahnhof.html" aria-current="page">Bahnhof</a></nav>
+  </div>
+  <nav class="tools" aria-label="Werkzeuge">
+    <button id="btnAddRow" class="btn primary" title="Personengleis unten anfügen">＋ Bahnsteiggleis</button>
+    <div class="seg" role="group" aria-label="Ebenen">
+      <button class="btn" data-layer="tracks" aria-pressed="true">Gleise</button>
+      <button class="btn" data-layer="signals" aria-pressed="true">Signale</button>
+      <button class="btn" data-layer="labels" aria-pressed="true">Beschriftung</button>
+    </div>
+    <div class="seg" role="group" aria-label="Bearbeiten">
+      <button class="btn icon" id="btnUndo" title="Rückgängig (⌘Z)" aria-label="Rückgängig">↶</button>
+      <button class="btn icon" id="btnRedo" title="Wiederholen (⇧⌘Z)" aria-label="Wiederholen">↷</button>
+      <button class="btn icon" id="btnFit" title="Alles einpassen" aria-label="Einpassen">⤢</button>
+      <button class="btn icon" id="btnAnim" title="Pfeil-Animation anhalten" aria-label="Pfeil-Animation anhalten" aria-pressed="true">⏸</button>
+    </div>
+    <div class="menu">
+      <button class="btn" id="btnMenu" aria-haspopup="true" aria-expanded="false">Datei ▾</button>
+      <div class="menu-list" id="menuList" hidden>
+        <button data-act="example:durchgang">Beispiel: Durchgangsbahnhof</button>
+        <button data-act="example:kopf">Beispiel: Kopfbahnhof</button>
+        <button data-act="example:kreuzung">Beispiel: Kreuzungsbahnhof (eingleisig)</button>
+        <button data-act="new">Neuer, leerer Bahnhof</button>
+        <hr>
+        <button data-act="save-json">Bahnhof speichern (.json)</button>
+        <button data-act="load-json">Bahnhof laden (.json) …</button>
+        <hr>
+        <button data-act="export-png">Als Bild speichern (.png)</button>
+        <button data-act="export-svg">Als Vektorgrafik speichern (.svg)</button>
+      </div>
+    </div>
+  </nav>
+</header>
+
+<main class="layout">
+  <section class="stage" aria-label="Zeichenfläche">
+    <svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Bahnhofsplan"></svg>
+    <div class="stats" id="stats" aria-live="polite"></div>
+    <p class="hint">Gleise, Zugarten und Streckengleise stellst du rechts ein · Fläche ziehen: verschieben · Mausrad/Pinch: zoomen · Gleis anklicken: in der Liste zeigen</p>
+  </section>
+
+  <aside class="side">
+    <section class="panel" id="panelStation" aria-label="Bahnhof"></section>
+
+    <section class="panel">
+      <h2>Einstellungen</h2>
+      <div class="row">
+        <span>Betrieb</span>
+        <div class="seg small" role="group" aria-label="Betrieb">
+          <button class="btn" data-setting="traffic" data-value="right">Rechtsverkehr</button>
+          <button class="btn" data-setting="traffic" data-value="left">Linksverkehr</button>
+        </div>
+      </div>
+      <details class="legend">
+        <summary>Legende</summary>
+        <ul>
+          <li><svg viewBox="0 0 44 14"><path d="M2 7H42" stroke="#4fb3ea" stroke-width="3.4"/></svg>Personenverkehr (Bahnsteig, Strecke, Weichenstraße)</li>
+          <li><svg viewBox="0 0 44 14"><path d="M2 7H42" stroke="#e0a13a" stroke-width="3.4"/></svg>Güterverkehr</li>
+          <li><svg viewBox="0 0 44 14"><path d="M2 7H42" stroke-width="3" style="stroke:var(--track)"/></svg>Streckengleis für Personen- und Güterzüge</li>
+          <li><svg viewBox="0 0 44 14"><path d="M4 2L40 12M4 12L40 2" stroke-width="2.2" style="stroke:var(--track)"/><circle cx="22" cy="7" r="4.6" stroke-width="1.4" style="fill:var(--bg);stroke:var(--ink)"/></svg>Gekreuzter Gleiswechsel (4 Weichen)</li>
+          <li><svg viewBox="0 0 44 14"><path d="M2 7H34" stroke="#4fb3ea" stroke-width="3"/><path d="M36 1V13" stroke-width="3" style="stroke:var(--ink)"/></svg>Prellbock (Kopfgleis)</li>
+          <li><svg viewBox="0 0 44 14"><circle cx="22" cy="7" r="6" style="fill:var(--sig-e)"/><path d="M26 7L19.5 3.8V10.2Z" style="fill:var(--bg)"/></svg>E – Einfahrsignal vor dem Vorfeld</li>
+          <li><svg viewBox="0 0 44 14"><circle cx="22" cy="7" r="6" style="fill:var(--sig-a)"/><path d="M26 7L19.5 3.8V10.2Z" style="fill:var(--bg)"/></svg>A – Ausfahrsignal am Bahnsteigende</li>
+          <li><svg viewBox="0 0 44 14"><circle cx="22" cy="7" r="6" style="fill:var(--sig-z)"/><path d="M26 7L19.5 3.8V10.2Z" style="fill:var(--bg)"/></svg>B – Blocksignal auf der Strecke, ≥ 1 Zuglänge hinter der letzten Weiche</li>
+          <li><svg viewBox="0 0 44 14"><circle cx="22" cy="7" r="5.6" stroke-width="1.8" style="fill:var(--panel);stroke:var(--sig-a)"/><path d="M26 7L19.5 3.8V10.2Z" style="fill:var(--sig-a)"/></svg>Hohl = Einbahn: Nein (Gleis in beide Richtungen)</li>
+        </ul>
+        <p class="fine">Pfeile laufen in Fahrtrichtung; ‹› bzw. wechselnde Pfeile = Gleis wird in beide Richtungen befahren.</p>
+      </details>
+    </section>
+
+    <section class="panel" id="panelGuide" aria-label="Bauanleitung"></section>
+    <section class="panel" id="panelNotes" aria-label="Hinweise"></section>
+  </aside>
+</main>
+
+<input type="file" id="fileInput" accept=".json,application/json" hidden>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="js/common.js?v=6"></script>
+<script src="js/geometry.js?v=6"></script>
+<script src="js/planner.js?v=6"></script>
+<script src="js/render.js?v=6"></script>
+<script src="js/station.js?v=6"></script>
+<script src="js/station-render.js?v=6"></script>
+<script src="js/station-editor.js?v=6"></script>
+</body>
+</html>
