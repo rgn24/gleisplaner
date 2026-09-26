@@ -172,6 +172,23 @@ test('Vorrang: K-Schild vor „ebenerdig“ vor „Brücke/Tunnel“', () => {
   assert.equal(st.source, 'override');
 });
 
+test('Bauablauf: was unten liegt, kommt zuerst', () => {
+  const check = (P, tag) => {
+    for (const st of P.structures) {
+      if (st.mode !== 'bridge') continue;
+      assert.ok(P.buildLevel.get(st.over) > P.buildLevel.get(st.under), `${tag} ${st.label}: ${st.over.colorName} über ${st.under.colorName}`);
+    }
+  };
+  const P = PL.plan(EX.get('skizze'));
+  check(P, 'Skizze');
+  const lv = Object.fromEntries([...P.buildLevel].map(([K, l]) => [K.colorName, l]));
+  assert.equal(lv.Rot, 0);                                         // Rot liegt überall unten
+  assert.ok(lv.Gelb > lv.Rot);
+  assert.equal(P.guide.build[0].title, 'Zuläufe und Weichen');
+  assert.equal(P.guide.build[P.guide.build.length - 1].title, 'Signale setzen');
+  for (let seed = 1; seed <= 30; seed++) check(PL.plan(randomModel(seed)), `seed ${seed}`);
+});
+
 test('allocate: Gruppen nach Last, Zusatzgleise nach D\'Hondt', () => {
   const f = (w) => ({ w });
   const lanes = ['L0', 'L1'];

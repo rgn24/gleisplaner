@@ -333,15 +333,28 @@
     }
   }
 
-  // Hervorhebung (Hover in der Bauanleitung ↔ Zeichnung)
-  function highlight(svg, P, ref) {
+  // Hervorhebung (Hover in Bauanleitung/Hinweisen ↔ Zeichnung); mehrere Referenzen durch Leerzeichen getrennt
+  function highlight(svg, P, refs) {
     const g = svg.querySelector('#gp-hl');
     if (!g) return;
     g.textContent = '';
-    if (!ref || !P) return;
+    if (!refs || !P) return;
+    for (const ref of String(refs).split(/\s+/).filter(Boolean)) highlightOne(g, P, ref);
+  }
+  function highlightOne(g, P, ref) {
     const T = theme();
     const ring = (p, r) => el(g, 'circle', { cx: f(p.x), cy: f(p.y), r: r || 13, fill: 'none', stroke: T.accent, 'stroke-width': 2.6, class: 'pulse' });
     const glow = (pts) => el(g, 'path', { d: d(pts), fill: 'none', stroke: T.accent, 'stroke-width': 9, opacity: 0.45, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+    if (ref.startsWith('conn:')) {
+      const id = ref.slice(5);
+      for (const s of P.strands) if (s.conn.id === id) glow(s.path);
+      return;
+    }
+    if (ref.startsWith('presort:')) {
+      const id = ref.slice(8);
+      for (const pr of P.presorts) if (pr.node.id === id) for (const pair of pr.pairs) for (const sg of pair.segs) glow(sg);
+      return;
+    }
     if (ref.startsWith('lane:') || ref.startsWith('node:')) {
       const id = ref.slice(5);
       const hit = (L) => L && (ref[0] === 'l' ? L.id === id : L.node.id === id);

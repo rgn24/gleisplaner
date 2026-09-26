@@ -40,7 +40,7 @@
   let autoFit = true;                 // bis der Nutzer selbst schiebt/zoomt, passt sich die Ansicht an
   let lastSize = { w: 0, h: 0 };
   const hist = { undo: [], redo: [] };
-  const openSecs = { nodes: true, signals: true, switches: false, structures: true };
+  const openSecs = { build: true, nodes: true, signals: true, switches: false, structures: true };
 
   const nodeById = (id) => model.nodes.find(n => n.id === id);
   const connById = (id) => model.connections.find(c => c.id === id);
@@ -363,11 +363,6 @@
       const crossOpt = (v, label) => `<button class="btn" data-crossing="${v}" aria-pressed="${(c.crossing || 'auto') === v}">${label}</button>`;
       return `<h2>Verbindung</h2>
         <p class="lead"><span class="dot" style="background:${esc(c.color)}"></span> ${esc(a.name)} ↔ ${esc(b.name)}</p>
-        <div class="row"><span>Farbe</span></div>
-        <div class="swatches">${PL.PALETTE.map(p => `<button class="swatch" style="background:${p.hex}" data-color="${p.hex}" aria-label="${p.name}" aria-pressed="${p.hex.toLowerCase() === c.color.toLowerCase()}"></button>`).join('')}</div>
-        <div class="row"><span>Verkehr</span><div class="seg small" role="group" aria-label="Verkehr">${[1, 2, 3].map(w =>
-          `<button class="btn" data-weight="${w}" aria-pressed="${c.weight === w}">${PL.WEIGHTS[w]}</button>`).join('')}</div></div>
-        <p class="fine">Mehr Verkehr bekommt eher ein eigenes Gleis. Bei Brücken liegt standardmäßig die Verbindung mit weniger Verkehr oben.</p>
         <h3>Kreuzungen dieser Verbindung</h3>
         <div class="seg small" role="group" aria-label="Kreuzungen dieser Verbindung">
           ${crossOpt('auto', 'Standard')}${crossOpt('bridge', 'Brücke/Tunnel')}${crossOpt('flat', 'Ebenerdig')}</div>
@@ -378,6 +373,11 @@
           return `<li class="item clickable" data-ref="${st.label}" data-struct="${esc(st.key)}"><span class="tag">${st.label}</span>
             <span>${dots([other.color])}× ${esc(other.colorName)} · ${how}${st.source === 'override' ? ' · einzeln' : ''}</span></li>`;
         }).join('')}</ul>` : '<p class="empty">Kreuzt keine andere Verbindung.</p>'}
+        <div class="row"><span>Farbe</span></div>
+        <div class="swatches">${PL.PALETTE.map(p => `<button class="swatch" style="background:${p.hex}" data-color="${p.hex}" aria-label="${p.name}" aria-pressed="${p.hex.toLowerCase() === c.color.toLowerCase()}"></button>`).join('')}</div>
+        <div class="row"><span>Verkehr</span><div class="seg small" role="group" aria-label="Verkehr">${[1, 2, 3].map(w =>
+          `<button class="btn" data-weight="${w}" aria-pressed="${c.weight === w}">${PL.WEIGHTS[w]}</button>`).join('')}</div></div>
+        <p class="fine">Mehr Verkehr bekommt eher ein eigenes Gleis. Bei Brücken liegt standardmäßig die Verbindung mit weniger Verkehr oben.</p>
         <div class="actions"><button class="btn danger" id="fDelConn">Verbindung löschen</button></div>`;
     }
     if (sel && sel.type === 'struct') {
@@ -422,7 +422,14 @@
     const sts = P.guide.structures.map(r => `<li class="item clickable" data-ref="${r.label}" data-struct="${esc(r.key)}"><span class="tag">${r.label}</span>
         <span>${dots(r.colors)}<b>${esc(r.text)}</b><br><span class="sub">${esc(r.detail)}</span><br>
         <button class="pillbtn ${r.ref.mode === 'flat' ? 'flat' : ''}" data-cycle="${esc(r.key)}" title="Umschalten">${esc(r.mode)} ⟳</button></span></li>`).join('');
+    const steps = (P.guide.build || []).map((st, i) => `<li class="step"${st.refs && st.refs.length ? ` data-ref="${esc(st.refs.join(' '))}"` : ''}>
+        <div class="steptitle"><span class="stepno">${i + 1}</span>${esc(st.title)}</div>
+        <div class="sub">${esc(st.text)}</div>
+        ${st.items ? `<ul class="items">${st.items.map(it => `<li class="item" data-ref="${esc(it.ref)}"><span class="tag">${dots(it.colors)}</span>
+          <span><b>${esc(it.title)}</b><br><span class="sub">${esc(it.text)}</span></span></li>`).join('')}</ul>` : ''}
+        ${st.warn ? `<div class="note warn">${esc(st.warn)}</div>` : ''}</li>`).join('');
     return `<h2>Bauanleitung</h2><div class="guide">
+      ${steps ? sec('build', 'Bauablauf', `${P.guide.build.length} Schritte`, `<ol class="steps">${steps}</ol>`) : ''}
       ${sec('nodes', 'Gleisbelegung je Anschluss', P.nodes.length, nodes + '<p class="fine">G1, G2 … von außen in den Knoten geschaut, von links nach rechts. → rein, ← raus.</p>')}
       ${sec('signals', 'Signale', P.signals.length, P.signals.length ? `<ul class="items">${sigs}</ul><p class="fine">Pfeil = Fahrtrichtung, für die das Signal gilt. Im Spiel Signal setzen, in diese Richtung drehen und „Einbahn“ wie angegeben einstellen.</p>` : '<p class="empty">Noch keine Signale.</p>')}
       ${sec('structures', 'Kreuzungen', P.structures.length, P.structures.length ? `<ul class="items">${sts}</ul>` : '<p class="empty">Keine Kreuzungen nötig.</p>')}
@@ -432,7 +439,8 @@
 
   function notesHtml(P) {
     if (!P.notes.length) return '<h2>Hinweise</h2><p class="empty">Keine Hinweise.</p>';
-    return `<h2>Hinweise</h2><ul class="notes">${P.notes.map(n => `<li class="note ${n.level}">${esc(n.text)}</li>`).join('')}</ul>`;
+    return `<h2>Hinweise</h2><ul class="notes">${P.notes.map(n =>
+      `<li class="note ${n.level}"${n.refs && n.refs.length ? ` data-ref="${esc(n.refs.join(' '))}"` : ''}>${esc(n.text)}</li>`).join('')}</ul>`;
   }
 
   function renderSide() {
@@ -650,6 +658,7 @@
   // ── Start ──
   refresh();
   requestAnimationFrame(fit);
+  if (window.GP.common) window.GP.common.watchUpdates('editor.js');
   R.setAnimation(svg, animOn);
   updateAnimButton();
   window.GP.editor = { get model() { return model; }, get plan() { return plan; }, refresh, fit };

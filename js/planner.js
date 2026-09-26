@@ -171,7 +171,7 @@
       model: m, side, C, center: null, ring: 0,
       nodes: [], lanes: [], connections: [], flows: [], strands: [],
       stems: [], stubs: [], switches: [], crossings: [], structures: [], bridges: [],
-      signals: [], presorts: [], notes: [], stats: {}, guide: { nodes: [], switches: [], structures: [], signals: [] },
+      signals: [], presorts: [], notes: [], stats: {}, guide: { nodes: [], switches: [], structures: [], signals: [], build: [] },
     };
     if (!m.nodes.length) return finish(P);
 
@@ -527,6 +527,7 @@
     const count = { E: 0, A: 0, Z: 0 };
     P.signals.forEach(sg => { sg.label = sg.kind + (++count[sg.kind]); });
     buildGuide(P);
+    buildSequence(P);
     buildNotes(P);
     const cnt = (arr, f) => arr.filter(f).length;
     P.stats = {
@@ -543,6 +544,64 @@
       presort: P.presorts.length,
     };
     return P;
+  }
+
+  // Bauablauf: Was unten liegt, zuerst bauen – beim Überbauen eines vorhandenen Gleises entsteht die Brücke
+  // (bzw. der Tunnel) aus der Kollision. Reihenfolge = längster Weg im Graphen „liegt unter“.
+  function buildSequence(P) {
+    const conns = P.connections.filter(K => K.strands.length);
+    const below = new Map(conns.map(K => [K, []]));
+    for (const st of P.structures) if (st.mode === 'bridge' && below.has(st.over)) below.get(st.over).push(st.under);
+    const level = new Map();
+    let rest = conns.slice(), lv = 0, cyclic = [];
+    while (rest.length) {
+      const ready = rest.filter(K => below.get(K).every(u => level.has(u)));
+      if (!ready.length) { cyclic = rest; rest.forEach(K => level.set(K, lv)); break; }
+      ready.forEach(K => level.set(K, lv));
+      rest = rest.filter(K => !level.has(K));
+      lv++;
+    }
+    P.buildLevel = level;
+    const perDir = (K) => {
+      const n = K.strands.length;
+      return n === 2 ? '2 Gleise (je Richtung eins)' : `${n} Gleise`;
+    };
+    const item = (K) => {
+      const over = P.structures.filter(st => st.mode === 'bridge' && st.over === K);
+      const under = P.structures.filter(st => st.mode === 'bridge' && st.under === K);
+      const flat = P.structures.filter(st => st.mode === 'flat' && (st.connA === K || st.connB === K));
+      const other = (st) => (st.connA === K ? st.connB : st.connA);
+      const parts = [perDir(K)];
+      if (over.length) parts.push(`über ${over.map(st => `${other(st).colorName} (${st.label})`).join(', ')} – beim Bauen die Höhe anheben, die Brücke entsteht automatisch`);
+      if (under.length) parts.push(`liegt unten bei ${under.map(st => st.label).join(', ')}`);
+      if (flat.length) parts.push(`kreuzt ebenerdig bei ${flat.map(st => st.label).join(', ')}`);
+      if (!over.length && !under.length && !flat.length) parts.push('ohne Kreuzung');
+      return { ref: `conn:${K.id}`, colors: [K.color], title: `${K.colorName} · ${K.label}`, text: parts.join(' · ') };
+    };
+    const steps = [];
+    const sw = P.switches.map(w => w.label);
+    const pre = P.presorts.map(pr => pr.node.name);
+    steps.push({ title: 'Zuläufe und Weichen', refs: sw,
+      text: `An allen Anschlüssen Streckengleise, gerade Zuläufe und die Weichen${sw.length ? ` ${sw[0]}–${sw[sw.length - 1]}` : ''} bauen – alles ebenerdig, hier kreuzt sich nichts.`
+        + (pre.length ? ` Dazu die Vorsortier-Gleiswechsel vor ${listDe(pre)}.` : '') });
+    const maxLv = conns.length ? Math.max(...conns.map(K => level.get(K))) : -1;
+    for (let l = 0; l <= maxLv; l++) {
+      const items = conns.filter(K => level.get(K) === l).map(item);
+      const cyc = cyclic.filter(K => level.get(K) === l);
+      steps.push({
+        title: l === 0 ? 'Zuerst: was unten liegt' : 'Danach: darüber bauen',
+        text: l === 0 ? 'Diese Verbindungen liegen nirgends oben – sie kommen zuerst.'
+          : 'Diese Verbindungen führen über die schon gebauten.',
+        items,
+        warn: cyc.length ? `${listDe(cyc.map(K => K.colorName))} liegen wechselseitig übereinander – eine der Brücken von Hand setzen oder über das K-Schild umdrehen.` : null,
+      });
+    }
+    const cnt = (k) => P.signals.filter(sg => sg.kind === k).length;
+    if (P.signals.length) {
+      steps.push({ title: 'Signale setzen', refs: P.signals.map(sg => sg.label),
+        text: `${cnt('E')} Einfahr-, ${cnt('A')} Ausfahr-${cnt('Z') ? ` und ${cnt('Z')} Wartesignale` : 'signale'} – Ort, Richtung und Einbahn stehen unter „Signale“.` });
+    }
+    P.guide.build = steps;
   }
 
   function buildGuide(P) {
@@ -619,13 +678,13 @@
     const add = (level, text, refs) => { if (!seen.has(text)) { seen.add(text); P.notes.push({ level, text, refs: refs || [] }); } };
     for (const f of P.flows) {
       if (!f.invalid) continue;
-      if (!f.oLanes.length) add('error', `${nm(f.from)} hat keine Einfahrgleise – Verbindungen von dort gehen so nicht. Gleisanzahl oder Aufteilung ändern.`);
-      else add('error', `${nm(f.to)} hat keine Ausfahrgleise – Verbindungen dorthin gehen so nicht. Gleisanzahl oder Aufteilung ändern.`);
+      if (!f.oLanes.length) add('error', `${nm(f.from)} hat keine Einfahrgleise – Verbindungen von dort gehen so nicht. Gleisanzahl oder Aufteilung ändern.`, [`node:${f.from.id}`]);
+      else add('error', `${nm(f.to)} hat keine Ausfahrgleise – Verbindungen dorthin gehen so nicht. Gleisanzahl oder Aufteilung ändern.`, [`node:${f.to.id}`]);
     }
     for (const L of P.lanes) {
       if (L.strands.length < 3) continue;
       const cols = uniq(L.strands.map(s => s.conn.colorName));
-      const sw = P.switches.filter(w => w.lane === L).map(w => w.label);
+      const sw = [`lane:${L.id}`, ...P.switches.filter(w => w.lane === L).map(w => w.label)];
       if (L.kind === 'in') add('warn', `Engpass: ${laneLabel(L)} verteilt auf ${L.strands.length} Fahrwege (${listDe(cols)}). Züge warten schon vor dem Knoten aufeinander – mehr Gleise an ${nm(L.node)} würden entlasten.`, sw);
       else add('warn', `Engpass: ${laneLabel(L)} sammelt ${L.strands.length} Fahrwege (${listDe(cols)}) mit ${L.strands.length - 1} Einfädelungen hintereinander.`, sw);
     }
@@ -639,20 +698,20 @@
     for (const pr of P.presorts) {
       const parts = pr.lanes.map(L => `G${L.no} → ${uniq(L.strands.map(s => s.flow.to.name)).join(', ')}`);
       const e = P.signals.filter(s => s.kind === 'E' && s.node === pr.node).map(s => s.label);
-      add('info', `Vor ${nm(pr.node)}: Gleiswechsel zwischen den Einfahrgleisen (≥ 1 Zuglänge vor ${listDe(e)}), damit Züge je nach Ziel das richtige Gleis nehmen: ${parts.join(' · ')}.`, e);
+      add('info', `Vor ${nm(pr.node)}: Gleiswechsel zwischen den Einfahrgleisen (≥ 1 Zuglänge vor ${listDe(e)}), damit Züge je nach Ziel das richtige Gleis nehmen: ${parts.join(' · ')}.`, [`presort:${pr.node.id}`, ...e]);
     }
     for (const N of P.nodes) {
       if (!N.single || !N.lanes.some(L => L.strands.length)) continue;
       const e = P.signals.find(s => s.kind === 'E' && s.node === N), a = P.signals.find(s => s.kind === 'A' && s.node === N);
-      add('info', `${nm(N)} ist eingleisig: ${e ? e.label : 'Einfahrsignal'} ohne Einbahn, ${a ? a.label : 'Ausfahrsignal'} vor der Spreizweiche. Auf der Strecke dahinter Ausweichen mit Signalen an beiden Enden einplanen.`, [e, a].filter(Boolean).map(s => s.label));
+      add('info', `${nm(N)} ist eingleisig: ${e ? e.label : 'Einfahrsignal'} ohne Einbahn, ${a ? a.label : 'Ausfahrsignal'} vor der Spreizweiche. Auf der Strecke dahinter Ausweichen mit Signalen an beiden Enden einplanen.`, [`node:${N.id}`, ...[e, a].filter(Boolean).map(s => s.label)]);
     }
     for (const N of P.nodes) {
-      if (!N.dep.length && !N.arr.length) { add('info', `${nm(N)} hat noch keine Verbindung.`); continue; }
+      if (!N.dep.length && !N.arr.length) { add('info', `${nm(N)} hat noch keine Verbindung.`, [`node:${N.id}`]); continue; }
       const idle = N.single ? [] : N.lanes.filter(L => !L.strands.length);
-      if (idle.length) add('info', `${nm(N)}: ${listDe(idle.map(L => 'G' + L.no))} ${idle.length > 1 ? 'werden' : 'wird'} nicht genutzt.`);
+      if (idle.length) add('info', `${nm(N)}: ${listDe(idle.map(L => 'G' + L.no))} ${idle.length > 1 ? 'werden' : 'wird'} nicht genutzt.`, idle.map(L => `lane:${L.id}`));
     }
     if (P.structures.length && P.structures.every(s => s.mode === 'bridge')) {
-      add('ok', `Alle ${P.structures.length} Kreuzungsstellen sind kreuzungsfrei (Brücke oder Tunnel) – Fahrwege treffen sich nur noch an Weichen.`);
+      add('ok', `Alle ${P.structures.length} Kreuzungsstellen sind kreuzungsfrei (Brücke oder Tunnel) – Fahrwege treffen sich nur noch an Weichen.`, P.structures.map(st => st.label));
     }
     if (P.strands.length) add('info', 'Faustregel: Hinter jeder Weiche oder Kreuzung bis zum nächsten Signal mindestens eine Zuglänge Platz lassen; auf der Strecke Signale nicht dichter als eine Zuglänge setzen.');
   }

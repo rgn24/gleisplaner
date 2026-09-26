@@ -21,8 +21,10 @@ welche Richtung steht**.
      alle Stellen, an denen diese Verbindung andere kreuzt. „Ebenerdig“ hat Vorrang vor „Brücke/Tunnel“; wer
      „Brücke/Tunnel“ gewählt hat, liegt oben.
    - *K-Schild anklicken*: eine einzelne Kreuzung umstellen (welche Verbindung oben liegt oder flach).
-5. Die **Bauanleitung** in der Seitenleiste listet Gleisbelegung je Anschluss, Signale (mit Richtung und
-   Einbahn-Einstellung), Kreuzungen und Weichen. Hover hebt das Element in der Zeichnung hervor.
+5. Die **Bauanleitung** beginnt mit dem **Bauablauf**: erst Zuläufe und Weichen, dann die Verbindungen, die
+   unten liegen, danach die darüberliegenden (beim Überbauen entsteht die Brücke automatisch), zuletzt die
+   Signale. Dazu Gleisbelegung je Anschluss, Signale (Richtung + Einbahn), Kreuzungen und Weichen. Hover über
+   einen Eintrag oder Hinweis markiert die Stelle in der Zeichnung.
 6. „Datei“: Beispiel laden, Plan als JSON speichern/laden, als PNG/SVG exportieren. Der aktuelle Plan wird
    automatisch im Browser gespeichert.
 
