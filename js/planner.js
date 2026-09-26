@@ -84,6 +84,7 @@
       id: String(c.id), a: String(c.a), b: String(c.b),
       color: c.color || PALETTE[i % PALETTE.length].hex,
       weight: [1, 2, 3].includes(+c.weight) ? +c.weight : 2,
+      crossing: ['bridge', 'flat'].includes(c.crossing) ? c.crossing : 'auto',   // Kreuzungen dieser Verbindung
     }));
     return m;
   }
@@ -224,7 +225,7 @@
     // 3) Verbindungen → gerichtete Ströme
     m.connections.forEach((c, ci) => {
       const A = byId.get(c.a), B = byId.get(c.b);
-      const K = { id: c.id, idx: ci, a: A, b: B, w: c.weight, color: c.color, colorName: colorName(c.color), strands: [] };
+      const K = { id: c.id, idx: ci, a: A, b: B, w: c.weight, crossing: c.crossing, color: c.color, colorName: colorName(c.color), strands: [] };
       K.label = `${A.name} ↔ ${B.name}`;
       P.connections.push(K);
       for (const [F, T] of [[A, B], [B, A]]) {
@@ -415,17 +416,22 @@
       const ov = m.crossingOverrides[key];
       const { A, B } = g;
       for (const cl of clusters) {
-        // standardmäßig liegt die Verbindung mit weniger Verkehr oben (bei Gleichstand die später angelegte)
-        const defOver = A.w < B.w ? A : B.w < A.w ? B : (A.idx > B.idx ? A : B);
-        let mode = 'bridge', over = null;
-        if (ov === 'flat') mode = 'flat';
-        else if (ov === A.id) over = A;
-        else if (ov === B.id) over = B;
-        else if (m.settings.crossingDefault === 'flat') mode = 'flat';
+        // Oben liegt, wer ausdrücklich „Brücke/Tunnel“ will; sonst die Verbindung mit weniger Verkehr,
+        // bei Gleichstand die später angelegte.
+        const wantsA = A.crossing === 'bridge', wantsB = B.crossing === 'bridge';
+        const defOver = wantsA !== wantsB ? (wantsA ? A : B) : A.w < B.w ? A : B.w < A.w ? B : (A.idx > B.idx ? A : B);
+        // Vorrang: einzelne Kreuzung (K-Schild) > Einstellung der Verbindung („ebenerdig“ vor „Brücke“) > Standard
+        const flatBy = [A, B].filter(k => k.crossing === 'flat');
+        let mode, over = null, source;
+        if (ov === 'flat') { mode = 'flat'; source = 'override'; }
+        else if (ov === A.id || ov === B.id) { mode = 'bridge'; over = ov === A.id ? A : B; source = 'override'; }
+        else if (flatBy.length) { mode = 'flat'; source = 'connection'; }
+        else if (wantsA || wantsB) { mode = 'bridge'; source = 'connection'; }
+        else { mode = m.settings.crossingDefault === 'flat' ? 'flat' : 'bridge'; source = 'default'; }
         if (mode === 'bridge' && !over) over = defOver;
         const strands = uniq(cl.flatMap(x => [x.a, x.b]));
         const st = {
-          key, connA: A, connB: B, crossings: cl, mode, defOver,
+          key, connA: A, connB: B, crossings: cl, mode, defOver, source, flatBy,
           over: mode === 'bridge' ? over : null,
           under: mode === 'bridge' ? (over === A ? B : A) : null,
           center: G.v(cl.reduce((s, x) => s + x.p.x, 0) / cl.length, cl.reduce((s, x) => s + x.p.y, 0) / cl.length),
@@ -502,6 +508,12 @@
     return f.length ? f[f.length - 1].ref : null;
   }
 
+  function reasonText(st) {
+    if (st.source === 'override') return ' · einzeln eingestellt';
+    if (st.source !== 'connection') return '';
+    return st.mode === 'flat' ? ` · ${listDe(st.flatBy.map(k => k.colorName))} ebenerdig` : ' · Einstellung der Verbindung';
+  }
+
   function finish(P) {
     const kindOrder = { diverge: 0, merge: 1, split: 2 };
     P.switches.sort((a, b) => a.node.idx - b.node.idx || kindOrder[a.kind] - kindOrder[b.kind]
@@ -574,7 +586,7 @@
       label: st.label, ref: st, key: st.key,
       text: `${st.connA.colorName} × ${st.connB.colorName}`,
       detail: `${st.connA.label} kreuzt ${st.connB.label} · ${st.tracksA}×${st.tracksB} Gleise`,
-      mode: st.mode === 'bridge' ? `Brücke/Tunnel – ${st.over.colorName} oben` : 'Flachkreuzung – Konfliktpunkt',
+      mode: (st.mode === 'bridge' ? `Brücke/Tunnel – ${st.over.colorName} oben` : 'Flachkreuzung – Konfliktpunkt') + reasonText(st),
       colors: [st.connA.color, st.connB.color],
     }));
 
@@ -618,6 +630,10 @@
       else add('warn', `Engpass: ${laneLabel(L)} sammelt ${L.strands.length} Fahrwege (${listDe(cols)}) mit ${L.strands.length - 1} Einfädelungen hintereinander.`, sw);
     }
     for (const st of P.structures) {
+      if (st.source === 'connection' && st.mode === 'flat' && (st.connA.crossing === 'bridge' || st.connB.crossing === 'bridge')) {
+        const want = [st.connA, st.connB].find(k => k.crossing === 'bridge');
+        add('info', `${st.label}: ${want.colorName} ist auf „Brücke/Tunnel“ gestellt, ${listDe(st.flatBy.map(k => k.colorName))} auf „ebenerdig“ – „ebenerdig“ hat Vorrang, die Stelle bleibt flach. Über das K-Schild lässt sie sich einzeln umstellen.`, [st.label]);
+      }
       if (st.mode === 'flat') add('warn', `${st.label} ist eine Flachkreuzung: ${st.connA.colorName} und ${st.connB.colorName} müssen sich abwechseln. Mit Brücke oder Tunnel fällt der Konflikt weg.`, [st.label]);
     }
     for (const pr of P.presorts) {

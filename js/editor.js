@@ -184,6 +184,19 @@
     sel = null;
     refresh();
   }
+  const defLabel = () => (model.settings.crossingDefault === 'flat' ? 'flach' : 'Brücke');
+  // Kreuzungs-Einstellung einer Verbindung; einzelne K-Einstellungen dieser Verbindung werden dabei zurückgesetzt,
+  // damit das Ergebnis vorhersehbar bleibt (⌘Z holt sie zurück)
+  function setConnCrossing(id, value) {
+    const c = connById(id);
+    if (!c || (c.crossing || 'auto') === value) return;
+    const keys = Object.keys(model.crossingOverrides).filter(k => k.split('|').includes(id));
+    commit(() => {
+      connById(id).crossing = value;
+      keys.forEach(k => { delete model.crossingOverrides[k]; });
+    });
+    if (keys.length) toast(keys.length === 1 ? 'Einzeln eingestellte Kreuzung dieser Verbindung zurückgesetzt' : `${keys.length} einzeln eingestellte Kreuzungen dieser Verbindung zurückgesetzt`);
+  }
   function setStructureMode(key, value) {
     commit(() => { model.crossingOverrides[key] = value; });
   }
@@ -339,6 +352,8 @@
     if (sel && sel.type === 'conn') {
       const c = connById(sel.id);
       const a = nodeById(c.a), b = nodeById(c.b);
+      const mine = plan.structures.filter(st => st.connA.id === c.id || st.connB.id === c.id);
+      const crossOpt = (v, label) => `<button class="btn" data-crossing="${v}" aria-pressed="${(c.crossing || 'auto') === v}">${label}</button>`;
       return `<h2>Verbindung</h2>
         <p class="lead"><span class="dot" style="background:${esc(c.color)}"></span> ${esc(a.name)} ↔ ${esc(b.name)}</p>
         <div class="row"><span>Farbe</span></div>
@@ -346,6 +361,16 @@
         <div class="row"><span>Verkehr</span><div class="seg small" role="group" aria-label="Verkehr">${[1, 2, 3].map(w =>
           `<button class="btn" data-weight="${w}" aria-pressed="${c.weight === w}">${PL.WEIGHTS[w]}</button>`).join('')}</div></div>
         <p class="fine">Mehr Verkehr bekommt eher ein eigenes Gleis. Bei Brücken liegt standardmäßig die Verbindung mit weniger Verkehr oben.</p>
+        <h3>Kreuzungen dieser Verbindung</h3>
+        <div class="seg small" role="group" aria-label="Kreuzungen dieser Verbindung">
+          ${crossOpt('auto', 'Standard')}${crossOpt('bridge', 'Brücke/Tunnel')}${crossOpt('flat', 'Ebenerdig')}</div>
+        <p class="fine">Gilt für alle Stellen, an denen ${esc(PL.colorName(c.color))} eine andere Verbindung kreuzt (Standard zurzeit: ${defLabel()}). „Ebenerdig“ hat Vorrang vor „Brücke/Tunnel“; einzelne Stellen stellst du über ihr K-Schild um.</p>
+        ${mine.length ? `<ul class="items">${mine.map(st => {
+          const other = st.connA.id === c.id ? st.connB : st.connA;
+          const how = st.mode === 'flat' ? 'flach' : `Brücke, ${esc(st.over.colorName)} oben`;
+          return `<li class="item clickable" data-ref="${st.label}" data-struct="${esc(st.key)}"><span class="tag">${st.label}</span>
+            <span>${dots([other.color])}× ${esc(other.colorName)} · ${how}${st.source === 'override' ? ' · einzeln' : ''}</span></li>`;
+        }).join('')}</ul>` : '<p class="empty">Kreuzt keine andere Verbindung.</p>'}
         <div class="actions"><button class="btn danger" id="fDelConn">Verbindung löschen</button></div>`;
     }
     if (sel && sel.type === 'struct') {
@@ -360,7 +385,12 @@
             ${opt(st.connA.id, `Brücke/Tunnel – ${esc(st.connA.colorName)} oben`)}
             ${opt(st.connB.id, `Brücke/Tunnel – ${esc(st.connB.colorName)} oben`)}
             ${opt('flat', 'Flachkreuzung (Züge müssen sich abwechseln)')}
-          </div>`;
+          </div>
+          <p class="fine">${st.source === 'override'
+            ? `Einzeln eingestellt. <button class="link" data-unoverride="${esc(st.key)}">Wieder den Verbindungen folgen</button>`
+            : st.source === 'connection'
+              ? (st.mode === 'flat' ? `Flach, weil ${esc(st.flatBy.map(k => k.colorName).join(' und '))} auf „ebenerdig“ steht.` : 'Brücke/Tunnel laut Einstellung der Verbindung.')
+              : `Folgt dem Standard (${defLabel()}).`}</p>`;
       }
     }
     return `<h2>Auswahl</h2>
@@ -438,8 +468,12 @@
     }
   });
   $('#panelSel').addEventListener('click', (ev) => {
+    const row = ev.target.closest('[data-struct]');
+    if (row) { sel = { type: 'struct', id: row.dataset.struct }; refresh(); return; }
     const t = ev.target.closest('button');
     if (!t || !sel) return;
+    if (t.dataset.crossing) { setConnCrossing(sel.id, t.dataset.crossing); return; }
+    if (t.dataset.unoverride) { const k = t.dataset.unoverride; commit(() => { delete model.crossingOverrides[k]; }); return; }
     if (t.dataset.step) {
       const n = nodeById(sel.id);
       commit(() => { n.tracks = clamp(n.tracks + (+t.dataset.step), 1, 8); if (n.inCount != null && n.inCount > n.tracks) n.inCount = null; });

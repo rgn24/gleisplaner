@@ -13,11 +13,16 @@ welche Richtung steht**.
    1 Gleis = eingleisige Strecke.
 2. **Verbinden:** Anschluss anklicken und den „+“-Griff auf einen anderen Anschluss ziehen – oder in der
    Seitenleiste die Häkchen setzen. Jede Verbindung gilt in beide Richtungen.
-3. Der **Gleisplan** entsteht sofort. Pfeile zeigen die Fahrtrichtung, K-Schilder markieren Kreuzungen
-   (anklicken: welche Verbindung oben liegt, oder Flachkreuzung).
-4. Die **Bauanleitung** in der Seitenleiste listet Gleisbelegung je Anschluss, Signale (mit Richtung und
+3. Der **Gleisplan** entsteht sofort. Pfeile zeigen die Fahrtrichtung, K-Schilder markieren Kreuzungen.
+4. **Brücke oder ebenerdig** – auf drei Ebenen einstellbar, das Genauere gewinnt:
+   - *Einstellungen → Kreuzungen (Standard)*: gilt für alle Verbindungen.
+   - *Verbindung anklicken → Kreuzungen dieser Verbindung*: „Standard“, „Brücke/Tunnel“ oder „Ebenerdig“ für
+     alle Stellen, an denen diese Verbindung andere kreuzt. „Ebenerdig“ hat Vorrang vor „Brücke/Tunnel“; wer
+     „Brücke/Tunnel“ gewählt hat, liegt oben.
+   - *K-Schild anklicken*: eine einzelne Kreuzung umstellen (welche Verbindung oben liegt oder flach).
+5. Die **Bauanleitung** in der Seitenleiste listet Gleisbelegung je Anschluss, Signale (mit Richtung und
    Einbahn-Einstellung), Kreuzungen und Weichen. Hover hebt das Element in der Zeichnung hervor.
-5. „Datei“: Beispiel laden, Plan als JSON speichern/laden, als PNG/SVG exportieren. Der aktuelle Plan wird
+6. „Datei“: Beispiel laden, Plan als JSON speichern/laden, als PNG/SVG exportieren. Der aktuelle Plan wird
    automatisch im Browser gespeichert.
 
 ## Signalregeln

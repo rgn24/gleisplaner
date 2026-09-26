@@ -133,6 +133,45 @@ test('Gleisdreieck: je Abzweig eine unvermeidbare Kreuzung', () => {
   assert.equal(P.stats.merge, 3);
 });
 
+test('Verbindung „ebenerdig“: alle ihre Kreuzungen werden flach', () => {
+  const m = EX.get('skizze');
+  m.connections.find(c => c.id === 'c2').crossing = 'flat';            // Rot ebenerdig
+  const P = PL.plan(m);
+  for (const st of P.structures) {
+    const involves = st.connA.id === 'c2' || st.connB.id === 'c2';
+    assert.equal(st.mode, involves ? 'flat' : 'bridge', st.label);
+  }
+  assert.ok(P.stats.flat >= 1);
+});
+
+test('Verbindung „Brücke/Tunnel“ bei flachem Standard – und liegt dann oben', () => {
+  const m = EX.get('skizze');
+  m.settings.crossingDefault = 'flat';
+  m.connections.find(c => c.id === 'c3').crossing = 'bridge';          // Gelb mit Brücken
+  const P = PL.plan(m);
+  for (const st of P.structures) {
+    const involves = st.connA.id === 'c3' || st.connB.id === 'c3';
+    assert.equal(st.mode, involves ? 'bridge' : 'flat', st.label);
+    if (involves) assert.equal(st.over.id, 'c3', st.label);
+  }
+});
+
+test('Vorrang: K-Schild vor „ebenerdig“ vor „Brücke/Tunnel“', () => {
+  const m = EX.get('skizze');
+  m.connections.find(c => c.id === 'c2').crossing = 'flat';
+  m.connections.find(c => c.id === 'c3').crossing = 'bridge';
+  let P = PL.plan(m);
+  let st = P.structures.find(s => s.key === 'c2|c3');
+  assert.equal(st.mode, 'flat');
+  assert.equal(st.source, 'connection');
+  assert.ok(P.notes.some(n => n.text.includes('Vorrang')));
+  m.crossingOverrides = { 'c2|c3': 'c2' };
+  st = PL.plan(m).structures.find(s => s.key === 'c2|c3');
+  assert.equal(st.mode, 'bridge');
+  assert.equal(st.over.id, 'c2');
+  assert.equal(st.source, 'override');
+});
+
 test('allocate: Gruppen nach Last, Zusatzgleise nach D\'Hondt', () => {
   const f = (w) => ({ w });
   const lanes = ['L0', 'L1'];
@@ -158,6 +197,9 @@ test('normalizeModel: ungültige und doppelte Verbindungen fliegen raus', () => 
   assert.equal(m.nodes[0].tracks, 8);
   assert.equal(m.nodes[1].tracks, 1);
   assert.deepEqual(m.connections.map(c => c.id), ['3']);
+  assert.equal(m.connections[0].crossing, 'auto');
+  assert.equal(PL.normalizeModel({ nodes: m.nodes, connections: [{ id: 5, a: 'a', b: 'b', crossing: 'quatsch' }] }).connections[0].crossing, 'auto');
+  assert.equal(PL.normalizeModel({ nodes: m.nodes, connections: [{ id: 5, a: 'a', b: 'b', crossing: 'flat' }] }).connections[0].crossing, 'flat');
 });
 
 test('leere und fast leere Modelle stürzen nicht ab', () => {
