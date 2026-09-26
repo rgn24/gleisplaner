@@ -116,6 +116,8 @@
     const selNode = ui.sel && ui.sel.type === 'node' ? ui.sel.id : null;
     const selConn = ui.sel && ui.sel.type === 'conn' ? ui.sel.id : null;
     const selStruct = ui.sel && ui.sel.type === 'struct' ? ui.sel.id : null;
+    const selTrack = ui.sel && ui.sel.type === 'track' ? ui.sel.id : null;
+    const strandOn = (s) => selConn === s.conn.id || selTrack === s.id;
     svg.textContent = '';
     if (!exporting) svg.__flows = [];
     svg.setAttribute('font-family', T.font);
@@ -172,7 +174,7 @@
         flow(svg, gTrack, st.pts, G.cumulative(st.pts), T.bg, 40, 'oneway', exporting);
       }
       for (const s of P.strands) {
-        const on = selConn === s.conn.id;
+        const on = strandOn(s);
         el(gTrack, 'path', { d: d(s.path), fill: 'none', stroke: s.color, 'stroke-width': on ? 4.6 : 3.2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
           'data-conn': s.conn.id, 'data-strand': s.id, class: exporting ? null : 'strand' });
         flow(svg, gTrack, s.path, s.cum, T.bg, 110, 'oneway', exporting);
@@ -192,7 +194,8 @@
           const f1 = G.add(rail[rail.length - 1], G.add(G.mul(t1, 4), G.mul(G.right(t1), side * 4)));
           el(gTrack, 'path', { d: d([f0, ...rail, f1]), fill: 'none', stroke: T.ink, 'stroke-width': 1.4, 'stroke-linejoin': 'round', opacity: 0.85 });
         }
-        el(gTrack, 'path', { d: d(sub), fill: 'none', stroke: s.color, 'stroke-width': selConn === s.conn.id ? 4.6 : 3.2, 'stroke-linecap': 'butt' });
+        el(gTrack, 'path', { d: d(sub), fill: 'none', stroke: s.color, 'stroke-width': strandOn(s) ? 4.6 : 3.2, 'stroke-linecap': 'butt',
+          'data-conn': s.conn.id, 'data-strand': s.id, class: exporting ? null : 'strand' });
       }
 
       // Maßklammer: Ausfahrsignal mindestens eine Zuglänge hinter der letzten Einfädelung
@@ -246,7 +249,7 @@
               fill: 'none', stroke: T.warn, 'stroke-width': 1.8 });
           }
         }
-        const on = selStruct === st.key;
+        const on = !!selStruct && (selStruct === st.key || st.crossings.some(x => x.trackKey === selStruct));
         const g = el(gMarks, 'g', { 'data-struct': st.key, 'data-ref': st.label, class: exporting ? null : 'pill' });
         const w = 12 + st.label.length * 6.2;
         let c = G.add(st.center, G.v(0, -20));
@@ -348,6 +351,11 @@
     if (ref.startsWith('conn:')) {
       const id = ref.slice(5);
       for (const s of P.strands) if (s.conn.id === id) glow(s.path);
+      return;
+    }
+    if (ref.startsWith('track:')) {
+      const id = ref.slice(6);
+      for (const s of P.strands) if (s.id === id) glow(s.path);
       return;
     }
     if (ref.startsWith('presort:')) {

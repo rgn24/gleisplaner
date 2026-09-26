@@ -96,13 +96,13 @@ test('Flachkreuzung per Überschreibung → Wartesignal davor', () => {
   const before = PL.plan(m);
   m.crossingOverrides = { 'c2|c3': 'flat' };                   // Rot × Gelb flach
   const P = PL.plan(m);
-  const k = P.structures.find(s => s.key === 'c2|c3');
+  const k = P.structures.find(s => s.pairKey === 'c2|c3');
   assert.equal(k.mode, 'flat');
   assert.equal(P.stats.flat, 1);
   assert.ok(P.stats.Z > before.stats.Z);
   assert.ok(P.notes.some(n => n.level === 'warn' && n.text.includes('Flachkreuzung')));
   m.crossingOverrides = { 'c2|c3': 'c2' };                      // Rot oben
-  assert.equal(PL.plan(m).structures.find(s => s.key === 'c2|c3').over.id, 'c2');
+  assert.equal(PL.plan(m).structures.find(s => s.pairKey === 'c2|c3').over.id, 'c2');
 });
 
 test('Linksverkehr am gespiegelten Beispiel ergibt dieselben Kreuzungen', () => {
@@ -161,12 +161,12 @@ test('Vorrang: K-Schild vor „ebenerdig“ vor „Brücke/Tunnel“', () => {
   m.connections.find(c => c.id === 'c2').crossing = 'flat';
   m.connections.find(c => c.id === 'c3').crossing = 'bridge';
   let P = PL.plan(m);
-  let st = P.structures.find(s => s.key === 'c2|c3');
+  let st = P.structures.find(s => s.pairKey === 'c2|c3');
   assert.equal(st.mode, 'flat');
   assert.equal(st.source, 'connection');
   assert.ok(P.notes.some(n => n.text.includes('Vorrang')));
   m.crossingOverrides = { 'c2|c3': 'c2' };
-  st = PL.plan(m).structures.find(s => s.key === 'c2|c3');
+  st = PL.plan(m).structures.find(s => s.pairKey === 'c2|c3');
   assert.equal(st.mode, 'bridge');
   assert.equal(st.over.id, 'c2');
   assert.equal(st.source, 'override');
@@ -174,19 +174,61 @@ test('Vorrang: K-Schild vor „ebenerdig“ vor „Brücke/Tunnel“', () => {
 
 test('Bauablauf: was unten liegt, kommt zuerst', () => {
   const check = (P, tag) => {
-    for (const st of P.structures) {
-      if (st.mode !== 'bridge') continue;
-      assert.ok(P.buildLevel.get(st.over) > P.buildLevel.get(st.under), `${tag} ${st.label}: ${st.over.colorName} über ${st.under.colorName}`);
+    for (const x of P.crossings) {
+      if (x.mode !== 'bridge') continue;
+      const over = x.a.conn === x.over ? x.a : x.b, under = over === x.a ? x.b : x.a;
+      assert.ok(P.buildLevel.get(over) > P.buildLevel.get(under), `${tag} ${x.structure.label}: ${over.id} über ${under.id}`);
     }
   };
   const P = PL.plan(EX.get('skizze'));
   check(P, 'Skizze');
-  const lv = Object.fromEntries([...P.buildLevel].map(([K, l]) => [K.colorName, l]));
-  assert.equal(lv.Rot, 0);                                         // Rot liegt überall unten
-  assert.ok(lv.Gelb > lv.Rot);
+  const lv = (color) => Math.max(...P.strands.filter(t => t.conn.colorName === color).map(t => P.buildLevel.get(t)));
+  assert.equal(lv('Rot'), 0);                                      // Rot liegt überall unten
+  assert.ok(lv('Gelb') > lv('Rot'));
   assert.equal(P.guide.build[0].title, 'Zuläufe und Weichen');
   assert.equal(P.guide.build[P.guide.build.length - 1].title, 'Signale setzen');
   for (let seed = 1; seed <= 30; seed++) check(PL.plan(randomModel(seed)), `seed ${seed}`);
+});
+
+test('Einzelnes Gleis „ebenerdig“: nur diese Fahrtrichtung wird flach', () => {
+  const m = EX.get('skizze');
+  const red = PL.plan(m).strands.filter(t => t.conn.id === 'c2');
+  assert.equal(red.length, 2);
+  const [down, up] = red;
+  m.trackCrossing = { [down.id]: 'flat' };
+  const P = PL.plan(m);
+  for (const x of P.crossings) {
+    const ids = [x.a.id, x.b.id];
+    if (ids.includes(down.id)) assert.equal(x.mode, 'flat', 'Rot hin: flach');
+    else assert.equal(x.mode, 'bridge', 'alles andere, auch Rot zurück: Brücke');
+  }
+  for (const st of P.structures) assert.ok(st.crossings.every(x => x.mode === st.mode), `${st.label}: einheitliche Bauart`);
+  const flatSt = P.structures.filter(st => st.mode === 'flat');
+  assert.ok(flatSt.length >= 1 && flatSt.every(st => st.text.includes('→')), 'Richtung steht im Namen');
+  assert.ok(P.notes.some(n => n.level === 'warn' && n.text.includes('Flachkreuzung')));
+});
+
+test('Einzelnes Gleis „Brücke/Tunnel“ schlägt die Verbindung, K-Schild schlägt beides', () => {
+  const m = EX.get('skizze');
+  m.connections.find(c => c.id === 'c2').crossing = 'flat';          // Rot ebenerdig …
+  const up = PL.plan(m).strands.filter(t => t.conn.id === 'c2')[1];
+  m.trackCrossing = { [up.id]: 'bridge' };                            // … aber Rot zurück mit Brücke
+  let P = PL.plan(m);
+  for (const x of P.crossings) {
+    const ids = [x.a.id, x.b.id];
+    if (ids.includes(up.id)) { assert.equal(x.mode, 'bridge'); assert.equal(x.over.id, 'c2'); assert.equal(x.source, 'track'); }
+    else if (x.a.conn.id === 'c2' || x.b.conn.id === 'c2') assert.equal(x.mode, 'flat');
+  }
+  const x0 = P.crossings.find(x => x.a.id === up.id || x.b.id === up.id);
+  m.crossingOverrides = { [x0.trackKey]: 'flat' };
+  P = PL.plan(m);
+  assert.equal(P.crossings.find(x => x.trackKey === x0.trackKey).mode, 'flat');
+  assert.equal(P.crossings.find(x => x.trackKey === x0.trackKey).source, 'override');
+});
+
+test('normalizeModel: Gleis-Einstellungen nur mit gültigen Werten', () => {
+  const m = PL.normalizeModel({ trackCrossing: { a: 'flat', b: 'bridge', c: 'quatsch' } });
+  assert.deepEqual(m.trackCrossing, { a: 'flat', b: 'bridge' });
 });
 
 test('allocate: Gruppen nach Last, Zusatzgleise nach D\'Hondt', () => {

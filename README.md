@@ -15,12 +15,13 @@ welche Richtung steht**.
    Seitenleiste die Häkchen setzen. Jede Verbindung gilt in beide Richtungen.
 3. Der **Gleisplan** entsteht sofort. Die Pfeile laufen animiert in Fahrtrichtung (auf eingleisigen Stücken
    abwechselnd in beide Richtungen; ⏸ in der Werkzeugleiste hält sie an), K-Schilder markieren Kreuzungen.
-4. **Brücke oder ebenerdig** – auf drei Ebenen einstellbar, das Genauere gewinnt:
-   - *Einstellungen → Kreuzungen (Standard)*: gilt für alle Verbindungen.
-   - *Verbindung anklicken → Kreuzungen dieser Verbindung*: „Standard“, „Brücke/Tunnel“ oder „Ebenerdig“ für
-     alle Stellen, an denen diese Verbindung andere kreuzt. „Ebenerdig“ hat Vorrang vor „Brücke/Tunnel“; wer
-     „Brücke/Tunnel“ gewählt hat, liegt oben.
-   - *K-Schild anklicken*: eine einzelne Kreuzung umstellen (welche Verbindung oben liegt oder flach).
+4. **Brücke oder ebenerdig** – auf vier Ebenen einstellbar, das Genauere gewinnt:
+   - *Einstellungen → Kreuzungen (Standard)*: gilt für alle Gleise.
+   - *Gleis anklicken*: nur diese **eine Fahrtrichtung** auf „Brücke/Tunnel“, „Ebenerdig“ oder „Wie Verbindung“
+     stellen – die Gegenrichtung bleibt unverändert.
+   - *Gleis anklicken → „Ganze Verbindung“*: beide Richtungen auf einmal.
+   - *K-Schild anklicken*: eine einzelne Kreuzungsstelle umstellen (welche Seite oben liegt oder flach).
+   „Ebenerdig“ hat Vorrang vor „Brücke/Tunnel“; wer „Brücke/Tunnel“ gewählt hat, liegt oben.
 5. Die **Bauanleitung** beginnt mit dem **Bauablauf**: erst Zuläufe und Weichen, dann die Verbindungen, die
    unten liegen, danach die darüberliegenden (beim Überbauen entsteht die Brücke automatisch), zuletzt die
    Signale. Dazu Gleisbelegung je Anschluss, Signale (Richtung + Einbahn), Kreuzungen und Weichen. Hover über

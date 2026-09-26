@@ -29,7 +29,7 @@
     try { const v = localStorage.getItem(ANIM_KEY); return v == null ? !reduceMotion : v === '1'; } catch (e) { return !reduceMotion; }
   })();
 
-  let model = loadStored() || EX.get('skizze');
+  let model = loadStored() || PL.normalizeModel(EX.get('skizze'));
   let plan = null;
   let sel = null;            // { type: 'node' | 'conn' | 'struct', id }
   let hover = null;          // Referenz (E3, W2, K1, lane:…)
@@ -192,30 +192,72 @@
     refresh();
   }
   const defLabel = () => (model.settings.crossingDefault === 'flat' ? 'flach' : 'Brücke');
-  // Kreuzungs-Einstellung einer Verbindung; einzelne K-Einstellungen dieser Verbindung werden dabei zurückgesetzt,
+  const dirName = (t) => `${t.flow.from.name} → ${t.flow.to.name}` + (t.flow.strands.length > 1 ? ` · Gleis ${t.j + 1}` : '');
+  const trackLabel = (v) => (v === 'flat' ? 'ebenerdig' : v === 'bridge' ? 'Brücke/Tunnel' : 'wie Verbindung');
+  const findStructure = (key) => plan.structures.find(st => st.key === key || st.crossings.some(x => x.trackKey === key));
+  const isPairKey = (k) => !k.includes(':');
+  // Ältere Überschreibungen für ein ganzes Verbindungspaar auf die einzelnen Gleis-Kreuzungen übertragen,
+  // damit man danach eine Fahrtrichtung ändern kann, ohne die andere mitzuziehen
+  function materializePairs(test) {
+    for (const k of Object.keys(model.crossingOverrides)) {
+      if (!isPairKey(k) || !test(k)) continue;
+      const v = model.crossingOverrides[k];
+      for (const x of plan.crossings) if (x.pairKey === k && !(x.trackKey in model.crossingOverrides)) model.crossingOverrides[x.trackKey] = v;
+      delete model.crossingOverrides[k];
+    }
+  }
+  const resetToast = (n) => { if (n) toast(n === 1 ? 'Eine einzeln eingestellte Kreuzung zurückgesetzt' : `${n} einzeln eingestellte Kreuzungen zurückgesetzt`); };
+
+  // Beide Richtungen einer Verbindung: Einstellungen einzelner Gleise und K-Schilder dieser Verbindung entfallen,
   // damit das Ergebnis vorhersehbar bleibt (⌘Z holt sie zurück)
   function setConnCrossing(id, value) {
     const c = connById(id);
-    if (!c || (c.crossing || 'auto') === value) return;
-    const keys = Object.keys(model.crossingOverrides).filter(k => k.split('|').includes(id));
+    if (!c) return;
+    const mine = (part) => part === id || part.startsWith(id + ':');
+    const keys = Object.keys(model.crossingOverrides).filter(k => k.split('|').some(mine));
+    const tracks = Object.keys(model.trackCrossing || {}).filter(mine);
+    if ((c.crossing || 'auto') === value && !keys.length && !tracks.length) return;
     commit(() => {
       connById(id).crossing = value;
       keys.forEach(k => { delete model.crossingOverrides[k]; });
+      tracks.forEach(k => { delete model.trackCrossing[k]; });
     });
-    if (keys.length) toast(keys.length === 1 ? 'Einzeln eingestellte Kreuzung dieser Verbindung zurückgesetzt' : `${keys.length} einzeln eingestellte Kreuzungen dieser Verbindung zurückgesetzt`);
+    if (tracks.length) toast('Gilt jetzt für beide Richtungen – Einstellungen einzelner Gleise zurückgesetzt');
+    else resetToast(keys.length);
   }
+  // Nur ein Gleis (eine Fahrtrichtung)
+  function setTrackCrossing(id, value) {
+    const t = plan.strands.find(s => s.id === id);
+    if (!t || ((model.trackCrossing || {})[id] || 'auto') === value) return;
+    let removed = 0;
+    commit(() => {
+      materializePairs(k => k.split('|').includes(t.conn.id));
+      for (const k of Object.keys(model.crossingOverrides)) if (k.split('|').includes(id)) { delete model.crossingOverrides[k]; removed++; }
+      if (value === 'auto') delete model.trackCrossing[id]; else model.trackCrossing[id] = value;
+    });
+    resetToast(removed);
+  }
+  // Ein Kreuzungsbauwerk (K-Schild): gilt für alle Gleis-Kreuzungen darin
   function setStructureMode(key, value) {
-    commit(() => { model.crossingOverrides[key] = value; });
+    const st = findStructure(key);
+    if (!st) return;
+    commit(() => {
+      materializePairs(k => k === st.pairKey);
+      for (const x of st.crossings) {
+        if (value == null) delete model.crossingOverrides[x.trackKey];
+        else model.crossingOverrides[x.trackKey] = value;
+      }
+    });
   }
   function cycleStructure(key) {
-    const st = plan.structures.find(s => s.key === key);
+    const st = findStructure(key);
     if (!st) return;
     // Reihenfolge: Standard oben → andere Verbindung oben → flach
     const other = st.defOver === st.connA ? st.connB : st.connA;
     const opts = [st.defOver.id, other.id, 'flat'];
     const cur = st.mode === 'flat' ? 'flat' : st.over.id;
-    sel = { type: 'struct', id: key };
-    setStructureMode(key, opts[(opts.indexOf(cur) + 1) % opts.length]);
+    sel = { type: 'struct', id: st.key };
+    setStructureMode(st.key, opts[(opts.indexOf(cur) + 1) % opts.length]);
   }
   function nodeAt(p, exceptId) {
     for (const N of plan.nodes) {
@@ -229,7 +271,7 @@
   // ── Zeichenfläche: Zeiger ──
   svg.addEventListener('pointerdown', (ev) => {
     if (ev.pointerType === 'mouse' && ev.button !== 0) return;
-    const t = ev.target.closest('[data-handle],[data-node],[data-struct],[data-conn]');
+    const t = ev.target.closest('[data-handle],[data-node],[data-struct],[data-strand],[data-conn]');
     const start = { x: ev.clientX, y: ev.clientY };
     const p = toWorld(ev);
     try { svg.setPointerCapture(ev.pointerId); } catch (e) { /* egal */ }
@@ -239,6 +281,7 @@
       const n = nodeById(t.dataset.node);
       drag = { kind: 'node', id: n.id, start, off: G.sub(G.v(n.x, n.y), p), snap: snapshot() };
     } else if (t && t.dataset.struct) drag = { kind: 'struct', key: t.dataset.struct, start };
+    else if (t && t.dataset.strand) drag = { kind: 'track', id: t.dataset.strand, start };
     else if (t && t.dataset.conn) drag = { kind: 'conn', id: t.dataset.conn, start };
     else drag = { kind: 'pan', start };
     drag.vx = view.x; drag.vy = view.y; drag.moved = false;
@@ -250,7 +293,7 @@
     if (!drag.moved && Math.hypot(dx, dy) < 4) return;
     drag.moved = true;
     const p = toWorld(ev);
-    if (drag.kind === 'struct' || drag.kind === 'conn') drag.kind = 'pan';
+    if (drag.kind === 'struct' || drag.kind === 'conn' || drag.kind === 'track') drag.kind = 'pan';
     if (drag.kind === 'pan') {
       view.x = drag.vx - dx / view.k; view.y = drag.vy - dy / view.k;
       autoFit = false;
@@ -290,6 +333,7 @@
       return;
     } else if (d.kind === 'struct') cycleStructure(d.key);
     else if (d.kind === 'conn') { sel = { type: 'conn', id: d.id }; refresh(); }
+    else if (d.kind === 'track') { sel = { type: 'track', id: d.id }; refresh(); }
     else if (d.kind === 'pan' && !d.moved && sel) { sel = null; refresh(); }
   }
   svg.addEventListener('pointerup', (ev) => endDrag(ev, false));
@@ -356,23 +400,48 @@
         }).join('') : '<p class="empty">Noch keine anderen Anschlüsse.</p>'}</div>
         <div class="actions"><button class="btn danger" id="fDelNode">Anschluss löschen</button></div>`;
     }
+    const structItem = (st) => {
+      const how = st.mode === 'flat' ? 'flach' : `Brücke, ${esc(st.over.colorName)} oben`;
+      return `<li class="item clickable" data-ref="${st.label}" data-struct="${esc(st.key)}"><span class="tag">${st.label}</span>
+        <span>${dots([st.connA.color, st.connB.color])}${esc(st.text)} · ${how}${st.source === 'override' ? ' · einzeln' : ''}</span></li>`;
+    };
+    if (sel && sel.type === 'track') {
+      const t = plan.strands.find(x => x.id === sel.id);
+      if (t) {
+        const K = t.conn, c = connById(K.id);
+        const cur = (model.trackCrossing || {})[t.id] || 'auto';
+        const connTxt = c.crossing === 'flat' ? 'ebenerdig' : c.crossing === 'bridge' ? 'Brücke/Tunnel' : `Standard, zurzeit ${defLabel()}`;
+        const mine = plan.structures.filter(st => st.crossings.some(x => x.a === t || x.b === t));
+        const opt = (v, label) => `<button class="btn" data-tcross="${v}" aria-pressed="${cur === v}">${label}</button>`;
+        const others = K.strands.filter(o => o !== t);
+        return `<h2>Gleis · eine Fahrtrichtung</h2>
+          <p class="lead"><span class="dot" style="background:${esc(K.color)}"></span> ${esc(dirName(t))}</p>
+          <p class="fine">${esc(K.colorName)}, Verbindung ${esc(K.label)}. Einstellungen hier gelten nur für dieses Gleis – die Gegenrichtung bleibt, wie sie ist.</p>
+          <h3>Kreuzungen dieses Gleises</h3>
+          <div class="seg small" role="group" aria-label="Kreuzungen dieses Gleises">${opt('auto', 'Wie Verbindung')}${opt('bridge', 'Brücke/Tunnel')}${opt('flat', 'Ebenerdig')}</div>
+          <p class="fine">„Wie Verbindung“ heißt zurzeit: ${esc(connTxt)}. „Ebenerdig“ hat Vorrang vor „Brücke/Tunnel“; einzelne Stellen stellst du über ihr K-Schild um.</p>
+          ${mine.length ? `<ul class="items">${mine.map(structItem).join('')}</ul>` : '<p class="empty">Dieses Gleis kreuzt nichts.</p>'}
+          ${others.length ? `<h3>Andere Richtung</h3><div class="checks">${others.map(o =>
+            `<button class="link" data-seltrack="${esc(o.id)}" data-ref="track:${esc(o.id)}">${esc(dirName(o))} – ${trackLabel((model.trackCrossing || {})[o.id])}</button>`).join('')}</div>` : ''}
+          <div class="actions"><button class="btn" data-selconn="${esc(K.id)}">Ganze Verbindung (beide Richtungen) …</button></div>`;
+      }
+    }
     if (sel && sel.type === 'conn') {
       const c = connById(sel.id);
       const a = nodeById(c.a), b = nodeById(c.b);
+      const K = plan.connections.find(k => k.id === c.id);
       const mine = plan.structures.filter(st => st.connA.id === c.id || st.connB.id === c.id);
       const crossOpt = (v, label) => `<button class="btn" data-crossing="${v}" aria-pressed="${(c.crossing || 'auto') === v}">${label}</button>`;
-      return `<h2>Verbindung</h2>
+      const tracks = K ? K.strands : [];
+      return `<h2>Verbindung · beide Richtungen</h2>
         <p class="lead"><span class="dot" style="background:${esc(c.color)}"></span> ${esc(a.name)} ↔ ${esc(b.name)}</p>
-        <h3>Kreuzungen dieser Verbindung</h3>
+        <h3>Kreuzungen – beide Richtungen</h3>
         <div class="seg small" role="group" aria-label="Kreuzungen dieser Verbindung">
           ${crossOpt('auto', 'Standard')}${crossOpt('bridge', 'Brücke/Tunnel')}${crossOpt('flat', 'Ebenerdig')}</div>
-        <p class="fine">Gilt für alle Stellen, an denen ${esc(PL.colorName(c.color))} eine andere Verbindung kreuzt (Standard zurzeit: ${defLabel()}). „Ebenerdig“ hat Vorrang vor „Brücke/Tunnel“; einzelne Stellen stellst du über ihr K-Schild um.</p>
-        ${mine.length ? `<ul class="items">${mine.map(st => {
-          const other = st.connA.id === c.id ? st.connB : st.connA;
-          const how = st.mode === 'flat' ? 'flach' : `Brücke, ${esc(st.over.colorName)} oben`;
-          return `<li class="item clickable" data-ref="${st.label}" data-struct="${esc(st.key)}"><span class="tag">${st.label}</span>
-            <span>${dots([other.color])}× ${esc(other.colorName)} · ${how}${st.source === 'override' ? ' · einzeln' : ''}</span></li>`;
-        }).join('')}</ul>` : '<p class="empty">Kreuzt keine andere Verbindung.</p>'}
+        <p class="fine">Gilt für alle Gleise von ${esc(PL.colorName(c.color))} (Standard zurzeit: ${defLabel()}). Nur eine Richtung ändern: unten das Gleis wählen oder in der Zeichnung direkt anklicken.</p>
+        ${tracks.length ? `<div class="checks">${tracks.map(t =>
+          `<button class="link" data-seltrack="${esc(t.id)}" data-ref="track:${esc(t.id)}">${esc(dirName(t))} – ${trackLabel((model.trackCrossing || {})[t.id])}</button>`).join('')}</div>` : ''}
+        ${mine.length ? `<ul class="items">${mine.map(structItem).join('')}</ul>` : '<p class="empty">Kreuzt keine andere Verbindung.</p>'}
         <div class="row"><span>Farbe</span></div>
         <div class="swatches">${PL.PALETTE.map(p => `<button class="swatch" style="background:${p.hex}" data-color="${p.hex}" aria-label="${p.name}" aria-pressed="${p.hex.toLowerCase() === c.color.toLowerCase()}"></button>`).join('')}</div>
         <div class="row"><span>Verkehr</span><div class="seg small" role="group" aria-label="Verkehr">${[1, 2, 3].map(w =>
@@ -381,22 +450,23 @@
         <div class="actions"><button class="btn danger" id="fDelConn">Verbindung löschen</button></div>`;
     }
     if (sel && sel.type === 'struct') {
-      const st = plan.structures.find(s => s.key === sel.id);
+      const st = findStructure(sel.id);
       if (st) {
         const cur = st.mode === 'flat' ? 'flat' : st.over.id;
         const opt = (v, label) => `<label><input type="radio" name="stmode" value="${esc(v)}" ${cur === v ? 'checked' : ''}> ${label}</label>`;
+        const why = (list) => list.map(t => `${t.conn.colorName} ${dirName(t)}`).join(' und ');
         return `<h2>Kreuzung ${st.label}</h2>
-          <p class="lead">${dots([st.connA.color, st.connB.color])}${esc(st.connA.colorName)} × ${esc(st.connB.colorName)}</p>
-          <p>${esc(st.connA.label)} kreuzt ${esc(st.connB.label)} · ${st.tracksA}×${st.tracksB} Gleise</p>
+          <p class="lead">${dots([st.connA.color, st.connB.color])}${esc(st.text)}</p>
+          <p>${esc(st.connA.label)} kreuzt ${esc(st.connB.label)} · ${st.tracksA}×${st.tracksB} ${st.tracksA * st.tracksB === 1 ? 'Gleis' : 'Gleise'}</p>
           <div class="checks" style="margin-top:10px">
             ${opt(st.connA.id, `Brücke/Tunnel – ${esc(st.connA.colorName)} oben`)}
             ${opt(st.connB.id, `Brücke/Tunnel – ${esc(st.connB.colorName)} oben`)}
             ${opt('flat', 'Flachkreuzung (Züge müssen sich abwechseln)')}
           </div>
           <p class="fine">${st.source === 'override'
-            ? `Einzeln eingestellt. <button class="link" data-unoverride="${esc(st.key)}">Wieder den Verbindungen folgen</button>`
-            : st.source === 'connection'
-              ? (st.mode === 'flat' ? `Flach, weil ${esc(st.flatBy.map(k => k.colorName).join(' und '))} auf „ebenerdig“ steht.` : 'Brücke/Tunnel laut Einstellung der Verbindung.')
+            ? `Einzeln eingestellt. <button class="link" data-unoverride="${esc(st.key)}">Wieder den Gleisen und Verbindungen folgen</button>`
+            : st.source === 'track' || st.source === 'connection'
+              ? (st.mode === 'flat' ? `Flach, weil ${esc(why(st.flatBy))} auf „ebenerdig“ steht.` : `Brücke/Tunnel, weil ${esc(why(st.wantsBridge))} so eingestellt ist.`)
               : `Folgt dem Standard (${defLabel()}).`}</p>`;
       }
     }
@@ -452,7 +522,7 @@
     $('#panelNotes').innerHTML = notesHtml(plan);
     document.querySelectorAll('[data-layer]').forEach(b => b.setAttribute('aria-pressed', String(!!model.settings.layers[b.dataset.layer])));
     document.querySelectorAll('[data-setting]').forEach(b => b.setAttribute('aria-pressed', String(model.settings[b.dataset.setting] === b.dataset.value)));
-    $('#btnResetOverrides').hidden = !Object.keys(model.crossingOverrides || {}).length;
+    $('#btnResetOverrides').hidden = !Object.keys(model.crossingOverrides || {}).length && !Object.keys(model.trackCrossing || {}).length;
     $('#btnUndo').disabled = !hist.undo.length;
     $('#btnRedo').disabled = !hist.redo.length;
     if (hover) document.querySelectorAll(`.side [data-ref="${CSS.escape(hover)}"]`).forEach(e => e.classList.add('hl'));
@@ -488,7 +558,10 @@
     const t = ev.target.closest('button');
     if (!t || !sel) return;
     if (t.dataset.crossing) { setConnCrossing(sel.id, t.dataset.crossing); return; }
-    if (t.dataset.unoverride) { const k = t.dataset.unoverride; commit(() => { delete model.crossingOverrides[k]; }); return; }
+    if (t.dataset.tcross) { setTrackCrossing(sel.id, t.dataset.tcross); return; }
+    if (t.dataset.seltrack) { sel = { type: 'track', id: t.dataset.seltrack }; refresh(); return; }
+    if (t.dataset.selconn) { sel = { type: 'conn', id: t.dataset.selconn }; refresh(); return; }
+    if (t.dataset.unoverride) { setStructureMode(t.dataset.unoverride, null); return; }
     if (t.dataset.step) {
       const n = nodeById(sel.id);
       commit(() => { n.tracks = clamp(n.tracks + (+t.dataset.step), 1, 8); if (n.inCount != null && n.inCount > n.tracks) n.inCount = null; });
@@ -551,7 +624,7 @@
     if (model.settings[b.dataset.setting] === b.dataset.value) return;
     commit(() => { model.settings[b.dataset.setting] = b.dataset.value; });
   }));
-  $('#btnResetOverrides').addEventListener('click', () => commit(() => { model.crossingOverrides = {}; }));
+  $('#btnResetOverrides').addEventListener('click', () => commit(() => { model.crossingOverrides = {}; model.trackCrossing = {}; }));
 
   // ── Datei-Menü ──
   const menu = $('#menuList'), menuBtn = $('#btnMenu');
@@ -647,7 +720,7 @@
     const key = ev.key.toLowerCase();
     if (mod && key === 'z' && !typing) { ev.preventDefault(); if (ev.shiftKey) redo(); else undo(); }
     else if (mod && key === 'y' && !typing) { ev.preventDefault(); redo(); }
-    else if ((ev.key === 'Delete' || ev.key === 'Backspace') && !typing && sel && sel.type !== 'struct') { ev.preventDefault(); deleteSelection(); }
+    else if ((ev.key === 'Delete' || ev.key === 'Backspace') && !typing && sel && (sel.type === 'node' || sel.type === 'conn')) { ev.preventDefault(); deleteSelection(); }
     else if (ev.key === 'Escape') {
       if (!menu.hidden) closeMenu();
       else if (typing) ev.target.blur();

@@ -6,7 +6,7 @@
 <title>Gleisknoten-Planer</title>
 <meta name="description" content="Bahnknoten für Transport Fever planen: Gleisbelegung, Weichen, Brücken und Signalrichtungen.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231f2124'/%3E%3Cpath d='M5 22 C12 22 14 10 27 10 M5 10 C12 10 14 22 27 22' fill='none' stroke='%23f2c14e' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 <header class="bar">
@@ -53,7 +53,7 @@
   <section class="stage" aria-label="Zeichenfläche">
     <svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Gleisplan"></svg>
     <div class="stats" id="stats" aria-live="polite"></div>
-    <p class="hint" id="hint">Doppelklick: neuer Anschluss · Kasten ziehen: verschieben · „+“ auf anderen Anschluss ziehen: verbinden · Pfeil ziehen: drehen · K-Schild anklicken: Brücke/flach</p>
+    <p class="hint" id="hint">Doppelklick: neuer Anschluss · Kasten ziehen: verschieben · „+“ auf anderen Anschluss ziehen: verbinden · Pfeil ziehen: drehen · Gleis anklicken: nur diese Fahrtrichtung · K-Schild: Brücke/flach</p>
   </section>
 
   <aside class="side">
@@ -75,8 +75,8 @@
           <button class="btn" data-setting="crossingDefault" data-value="flat">Flach</button>
         </div>
       </div>
-      <p class="fine">Gilt für alle Verbindungen. Einzelne Verbindung anklicken, um sie abweichend auf „Brücke/Tunnel“ oder „ebenerdig“ zu stellen.</p>
-      <button class="link" id="btnResetOverrides" hidden>Einzeln geänderte Kreuzungen zurücksetzen</button>
+      <p class="fine">Gilt für alle Gleise. Ein Gleis in der Zeichnung anklicken, um nur diese Fahrtrichtung auf „Brücke/Tunnel“ oder „ebenerdig“ zu stellen – oder dort „Ganze Verbindung“ für beide Richtungen.</p>
+      <button class="link" id="btnResetOverrides" hidden>Einzeln geänderte Gleise und Kreuzungen zurücksetzen</button>
       <details class="legend">
         <summary>Legende</summary>
         <ul>
@@ -103,11 +103,11 @@
 <input type="file" id="fileInput" accept=".json,application/json" hidden>
 <div class="toast" id="toast" role="status" hidden></div>
 
-<script src="js/common.js?v=6"></script>
-<script src="js/geometry.js?v=6"></script>
-<script src="js/planner.js?v=6"></script>
-<script src="js/examples.js?v=6"></script>
-<script src="js/render.js?v=6"></script>
-<script src="js/editor.js?v=6"></script>
+<script src="js/common.js?v=7"></script>
+<script src="js/geometry.js?v=7"></script>
+<script src="js/planner.js?v=7"></script>
+<script src="js/examples.js?v=7"></script>
+<script src="js/render.js?v=7"></script>
+<script src="js/editor.js?v=7"></script>
 </body>
 </html>

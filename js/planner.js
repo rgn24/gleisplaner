@@ -50,7 +50,7 @@
       version: 1,
       settings: { traffic: 'right', crossingDefault: 'bridge',
         layers: { sketch: false, tracks: true, signals: true, labels: true } },
-      nodes: [], connections: [], crossingOverrides: {},
+      nodes: [], connections: [], crossingOverrides: {}, trackCrossing: {},
     };
   }
 
@@ -63,6 +63,10 @@
     if (m.settings.traffic !== 'left') m.settings.traffic = 'right';
     if (m.settings.crossingDefault !== 'flat') m.settings.crossingDefault = 'bridge';
     m.crossingOverrides = m.crossingOverrides && typeof m.crossingOverrides === 'object' ? m.crossingOverrides : {};
+    // Brücke/ebenerdig für ein einzelnes Gleis (eine Fahrtrichtung), Schlüssel = Gleis-ID „Verbindung:von>nach#n“
+    const tc = m.trackCrossing && typeof m.trackCrossing === 'object' ? m.trackCrossing : {};
+    m.trackCrossing = {};
+    for (const [k, v] of Object.entries(tc)) if (v === 'bridge' || v === 'flat') m.trackCrossing[k] = v;
     m.nodes = (Array.isArray(m.nodes) ? m.nodes : []).filter(n => n && n.id != null).map((n, i) => {
       const tracks = clamp(Math.round(n.tracks == null || isNaN(+n.tracks) ? 2 : +n.tracks), 1, 8);
       let inCount = n.inCount == null || n.inCount === '' ? null : clamp(Math.round(+n.inCount), 0, tracks);
@@ -389,6 +393,10 @@
   }
 
   // Kreuzungen der Ringsehnen → Kreuzungsbauwerke (je Verbindungspaar räumlich gebündelt)
+  // Einstellung eines einzelnen Gleises (eine Fahrtrichtung) → sonst die der Verbindung
+  const trackPref = (m, s) => (m.trackCrossing[s.id] || (s.conn.crossing !== 'auto' ? s.conn.crossing : null));
+  const dirName = (s) => `${s.flow.from.name} → ${s.flow.to.name}` + (s.flow.strands.length > 1 ? ` · Gleis ${s.j + 1}` : '');
+
   function buildCrossings(P) {
     const S = P.strands, m = P.model;
     for (let i = 0; i < S.length; i++) {
@@ -399,44 +407,57 @@
         }
       }
     }
+    // 1) Brücke oder flach – für jede Kreuzung einzeln.
+    //    Vorrang: K-Schild > Einstellung des Gleises > der Verbindung („ebenerdig“ vor „Brücke“) > Standard
+    for (const x of P.crossings) {
+      const [ta, tb] = [x.a, x.b].sort((p, q) => p.conn.idx - q.conn.idx);
+      const A = ta.conn, B = tb.conn;
+      Object.assign(x, { ta, tb, A, B, pairKey: `${A.id}|${B.id}`, trackKey: [ta.id, tb.id].sort().join('|') });
+      const pa = trackPref(m, ta), pb = trackPref(m, tb);
+      const wantsA = pa === 'bridge', wantsB = pb === 'bridge';
+      // oben liegt, wer ausdrücklich „Brücke/Tunnel“ will; sonst weniger Verkehr, bei Gleichstand die später angelegte
+      x.defOver = wantsA !== wantsB ? (wantsA ? A : B) : A.w < B.w ? A : B.w < A.w ? B : (A.idx > B.idx ? A : B);
+      x.flatBy = [[ta, pa], [tb, pb]].filter(([, pr]) => pr === 'flat').map(([t]) => t);
+      x.wantsBridge = [[ta, wantsA], [tb, wantsB]].filter(([, w]) => w).map(([t]) => t);
+      const own = (t) => !!m.trackCrossing[t.id];
+      const ov = m.crossingOverrides[x.trackKey] ?? m.crossingOverrides[x.pairKey];
+      if (ov === 'flat') { x.mode = 'flat'; x.source = 'override'; }
+      else if (ov === A.id || ov === B.id) { x.mode = 'bridge'; x.over = ov === A.id ? A : B; x.source = 'override'; }
+      else if (x.flatBy.length) { x.mode = 'flat'; x.source = x.flatBy.some(own) ? 'track' : 'connection'; }
+      else if (x.wantsBridge.length) { x.mode = 'bridge'; x.source = x.wantsBridge.some(own) ? 'track' : 'connection'; }
+      else { x.mode = m.settings.crossingDefault === 'flat' ? 'flat' : 'bridge'; x.source = 'default'; }
+      if (x.mode === 'bridge' && !x.over) x.over = x.defOver;
+      if (x.mode !== 'bridge') x.over = null;
+    }
+    // 2) Kreuzungsbauwerke: gleiches Verbindungspaar, gleiche Bauart, räumlich nah beieinander
     const groups = new Map();
     for (const x of P.crossings) {
-      const [A, B] = [x.a.conn, x.b.conn].sort((p, q) => p.idx - q.idx);
-      x.key = `${A.id}|${B.id}`;
-      if (!groups.has(x.key)) groups.set(x.key, { A, B, list: [] });
-      groups.get(x.key).list.push(x);
+      const g = `${x.pairKey}|${x.mode}|${x.over ? x.over.id : ''}`;
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(x);
     }
-    for (const [key, g] of groups) {
+    const rank = { override: 3, track: 2, connection: 1, default: 0 };
+    for (const list of groups.values()) {
       const clusters = [];
-      for (const x of g.list) {
+      for (const x of list) {
         const near = clusters.filter(cl => cl.some(y => G.dist(x.p, y.p) <= C.CLUSTER));
         near.forEach(cl => clusters.splice(clusters.indexOf(cl), 1));
         clusters.push([x].concat(...near));
       }
-      const ov = m.crossingOverrides[key];
-      const { A, B } = g;
       for (const cl of clusters) {
-        // Oben liegt, wer ausdrücklich „Brücke/Tunnel“ will; sonst die Verbindung mit weniger Verkehr,
-        // bei Gleichstand die später angelegte.
-        const wantsA = A.crossing === 'bridge', wantsB = B.crossing === 'bridge';
-        const defOver = wantsA !== wantsB ? (wantsA ? A : B) : A.w < B.w ? A : B.w < A.w ? B : (A.idx > B.idx ? A : B);
-        // Vorrang: einzelne Kreuzung (K-Schild) > Einstellung der Verbindung („ebenerdig“ vor „Brücke“) > Standard
-        const flatBy = [A, B].filter(k => k.crossing === 'flat');
-        let mode, over = null, source;
-        if (ov === 'flat') { mode = 'flat'; source = 'override'; }
-        else if (ov === A.id || ov === B.id) { mode = 'bridge'; over = ov === A.id ? A : B; source = 'override'; }
-        else if (flatBy.length) { mode = 'flat'; source = 'connection'; }
-        else if (wantsA || wantsB) { mode = 'bridge'; source = 'connection'; }
-        else { mode = m.settings.crossingDefault === 'flat' ? 'flat' : 'bridge'; source = 'default'; }
-        if (mode === 'bridge' && !over) over = defOver;
-        const strands = uniq(cl.flatMap(x => [x.a, x.b]));
+        const x0 = cl[0], A = x0.A, B = x0.B;
+        const strandsA = uniq(cl.map(x => x.ta)), strandsB = uniq(cl.map(x => x.tb));
+        const side = (K, list) => K.colorName + (list.length < K.strands.length ? ` (${list.map(dirName).join(', ')})` : '');
         const st = {
-          key, connA: A, connB: B, crossings: cl, mode, defOver, source, flatBy,
-          over: mode === 'bridge' ? over : null,
-          under: mode === 'bridge' ? (over === A ? B : A) : null,
+          key: cl.map(x => x.trackKey).sort()[0],             // stellvertretend für Auswahl und Überschreibung
+          pairKey: x0.pairKey, connA: A, connB: B, crossings: cl, mode: x0.mode, defOver: x0.defOver,
+          source: cl.map(x => x.source).sort((p, q) => rank[q] - rank[p])[0],
+          flatBy: uniq(cl.flatMap(x => x.flatBy)), wantsBridge: uniq(cl.flatMap(x => x.wantsBridge)),
+          over: x0.mode === 'bridge' ? x0.over : null,
+          under: x0.mode === 'bridge' ? (x0.over === A ? B : A) : null,
           center: G.v(cl.reduce((s, x) => s + x.p.x, 0) / cl.length, cl.reduce((s, x) => s + x.p.y, 0) / cl.length),
-          tracksA: strands.filter(s => s.conn === A).length,
-          tracksB: strands.filter(s => s.conn === B).length,
+          strandsA, strandsB, tracksA: strandsA.length, tracksB: strandsB.length,
+          text: `${side(A, strandsA)} × ${side(B, strandsB)}`,
         };
         cl.forEach(x => { x.structure = st; });
         P.structures.push(st);
@@ -444,17 +465,15 @@
     }
     P.structures.sort((a, b) => (a.center.y - b.center.y) || (a.center.x - b.center.x));
     P.structures.forEach((st, i) => { st.label = `K${i + 1}`; });
-    for (const st of P.structures) {
-      if (st.mode !== 'bridge') continue;
-      for (const x of st.crossings) {
-        const onA = x.a.conn === st.over;
-        P.bridges.push({ structure: st, strand: onA ? x.a : x.b, under: onA ? x.b : x.a, s: onA ? x.sa : x.sb, p: x.p });
-      }
+    for (const x of P.crossings) {
+      if (x.mode !== 'bridge') continue;
+      const onA = x.a.conn === x.over;
+      P.bridges.push({ structure: x.structure, strand: onA ? x.a : x.b, under: onA ? x.b : x.a, s: onA ? x.sa : x.sb, p: x.p });
     }
   }
 
   const switchAt = (P, kind, lane, j) => P.switches.find(w => w.kind === kind && w.lane === lane && w.j === j) || null;
-  const flatOn = (P, s) => P.crossings.filter(x => x.structure && x.structure.mode === 'flat' && (x.a === s || x.b === s))
+  const flatOn = (P, s) => P.crossings.filter(x => x.mode === 'flat' && (x.a === s || x.b === s))
     .map(x => ({ s: x.a === s ? x.sa : x.sb, ref: x.structure })).sort((a, b) => a.s - b.s);
 
   // Signale: E = Einfahrt, A = Ausfahrt, Z = Wartesignal (bedingt)
@@ -510,8 +529,10 @@
 
   function reasonText(st) {
     if (st.source === 'override') return ' · einzeln eingestellt';
-    if (st.source !== 'connection') return '';
-    return st.mode === 'flat' ? ` · ${listDe(st.flatBy.map(k => k.colorName))} ebenerdig` : ' · Einstellung der Verbindung';
+    if (st.source === 'default') return '';
+    const who = (list) => listDe(uniq(list.map(t => (t.conn.crossing === 'flat' || t.conn.crossing === 'bridge') && !t.conn.strands.some(o => o !== t && !list.includes(o))
+      ? t.conn.colorName : `${t.conn.colorName} ${dirName(t)}`)));
+    return st.mode === 'flat' ? ` · ${who(st.flatBy)} ebenerdig` : ` · ${who(st.wantsBridge)} mit Brücke/Tunnel`;
   }
 
   function finish(P) {
@@ -549,34 +570,41 @@
   // Bauablauf: Was unten liegt, zuerst bauen – beim Überbauen eines vorhandenen Gleises entsteht die Brücke
   // (bzw. der Tunnel) aus der Kollision. Reihenfolge = längster Weg im Graphen „liegt unter“.
   function buildSequence(P) {
-    const conns = P.connections.filter(K => K.strands.length);
-    const below = new Map(conns.map(K => [K, []]));
-    for (const st of P.structures) if (st.mode === 'bridge' && below.has(st.over)) below.get(st.over).push(st.under);
+    // Stufen je Gleis (Fahrtrichtung): wer irgendwo oben liegt, kommt nach dem, worüber er führt
+    const tracks = P.strands;
+    const below = new Map(tracks.map(t => [t, []]));
+    for (const x of P.crossings) {
+      if (x.mode !== 'bridge') continue;
+      const over = x.a.conn === x.over ? x.a : x.b;
+      below.get(over).push(over === x.a ? x.b : x.a);
+    }
     const level = new Map();
-    let rest = conns.slice(), lv = 0, cyclic = [];
+    let rest = tracks.slice(), lv = 0, cyclic = [];
     while (rest.length) {
-      const ready = rest.filter(K => below.get(K).every(u => level.has(u)));
-      if (!ready.length) { cyclic = rest; rest.forEach(K => level.set(K, lv)); break; }
-      ready.forEach(K => level.set(K, lv));
-      rest = rest.filter(K => !level.has(K));
+      const ready = rest.filter(t => below.get(t).every(u => level.has(u)));
+      if (!ready.length) { cyclic = rest; rest.forEach(t => level.set(t, lv)); break; }
+      ready.forEach(t => level.set(t, lv));
+      rest = rest.filter(t => !level.has(t));
       lv++;
     }
     P.buildLevel = level;
-    const perDir = (K) => {
-      const n = K.strands.length;
-      return n === 2 ? '2 Gleise (je Richtung eins)' : `${n} Gleise`;
-    };
-    const item = (K) => {
-      const over = P.structures.filter(st => st.mode === 'bridge' && st.over === K);
-      const under = P.structures.filter(st => st.mode === 'bridge' && st.under === K);
-      const flat = P.structures.filter(st => st.mode === 'flat' && (st.connA === K || st.connB === K));
+    // Eintrag: ganze Verbindung, wenn beide Richtungen in dieselbe Stufe fallen – sonst je Fahrtrichtung
+    const entry = (K, list) => {
+      const whole = list.length === K.strands.length;
+      const xs = P.crossings.filter(x => list.includes(x.a) || list.includes(x.b));
+      const sts = (f) => uniq(xs.filter(f).map(x => x.structure));
+      const over = sts(x => x.mode === 'bridge' && x.over === K);
+      const under = sts(x => x.mode === 'bridge' && x.over !== K);
+      const flat = sts(x => x.mode === 'flat');
       const other = (st) => (st.connA === K ? st.connB : st.connA);
-      const parts = [perDir(K)];
+      const parts = [whole ? (K.strands.length === 2 ? '2 Gleise (je Richtung eins)' : `${K.strands.length} Gleise`)
+        : `nur ${list.length === 1 ? 'dieses Gleis' : `diese ${list.length} Gleise`}`];
       if (over.length) parts.push(`über ${over.map(st => `${other(st).colorName} (${st.label})`).join(', ')} – beim Bauen die Höhe anheben, die Brücke entsteht automatisch`);
       if (under.length) parts.push(`liegt unten bei ${under.map(st => st.label).join(', ')}`);
       if (flat.length) parts.push(`kreuzt ebenerdig bei ${flat.map(st => st.label).join(', ')}`);
       if (!over.length && !under.length && !flat.length) parts.push('ohne Kreuzung');
-      return { ref: `conn:${K.id}`, colors: [K.color], title: `${K.colorName} · ${K.label}`, text: parts.join(' · ') };
+      return { ref: whole ? `conn:${K.id}` : list.map(t => `track:${t.id}`).join(' '), colors: [K.color],
+        title: whole ? `${K.colorName} · ${K.label}` : `${K.colorName} · ${list.map(dirName).join(', ')}`, text: parts.join(' · ') };
     };
     const steps = [];
     const sw = P.switches.map(w => w.label);
@@ -584,16 +612,20 @@
     steps.push({ title: 'Zuläufe und Weichen', refs: sw,
       text: `An allen Anschlüssen Streckengleise, gerade Zuläufe und die Weichen${sw.length ? ` ${sw[0]}–${sw[sw.length - 1]}` : ''} bauen – alles ebenerdig, hier kreuzt sich nichts.`
         + (pre.length ? ` Dazu die Vorsortier-Gleiswechsel vor ${listDe(pre)}.` : '') });
-    const maxLv = conns.length ? Math.max(...conns.map(K => level.get(K))) : -1;
+    const maxLv = tracks.length ? Math.max(...tracks.map(t => level.get(t))) : -1;
     for (let l = 0; l <= maxLv; l++) {
-      const items = conns.filter(K => level.get(K) === l).map(item);
-      const cyc = cyclic.filter(K => level.get(K) === l);
+      const items = [];
+      for (const K of P.connections) {
+        const at = K.strands.filter(t => level.get(t) === l);
+        if (at.length) items.push(entry(K, at));
+      }
+      const cyc = cyclic.filter(t => level.get(t) === l);
       steps.push({
         title: l === 0 ? 'Zuerst: was unten liegt' : 'Danach: darüber bauen',
-        text: l === 0 ? 'Diese Verbindungen liegen nirgends oben – sie kommen zuerst.'
-          : 'Diese Verbindungen führen über die schon gebauten.',
+        text: l === 0 ? 'Diese Gleise liegen nirgends oben – sie kommen zuerst.'
+          : 'Diese Gleise führen über die schon gebauten.',
         items,
-        warn: cyc.length ? `${listDe(cyc.map(K => K.colorName))} liegen wechselseitig übereinander – eine der Brücken von Hand setzen oder über das K-Schild umdrehen.` : null,
+        warn: cyc.length ? `${listDe(uniq(cyc.map(t => t.conn.colorName)))} liegen wechselseitig übereinander – eine der Brücken von Hand setzen oder über das K-Schild umdrehen.` : null,
       });
     }
     const cnt = (k) => P.signals.filter(sg => sg.kind === k).length;
@@ -643,8 +675,8 @@
 
     P.guide.structures = P.structures.map(st => ({
       label: st.label, ref: st, key: st.key,
-      text: `${st.connA.colorName} × ${st.connB.colorName}`,
-      detail: `${st.connA.label} kreuzt ${st.connB.label} · ${st.tracksA}×${st.tracksB} Gleise`,
+      text: st.text,
+      detail: `${st.connA.label} kreuzt ${st.connB.label} · ${st.tracksA}×${st.tracksB} ${st.tracksA * st.tracksB === 1 ? 'Gleis' : 'Gleise'}`,
       mode: (st.mode === 'bridge' ? `Brücke/Tunnel – ${st.over.colorName} oben` : 'Flachkreuzung – Konfliktpunkt') + reasonText(st),
       colors: [st.connA.color, st.connB.color],
     }));
@@ -689,11 +721,11 @@
       else add('warn', `Engpass: ${laneLabel(L)} sammelt ${L.strands.length} Fahrwege (${listDe(cols)}) mit ${L.strands.length - 1} Einfädelungen hintereinander.`, sw);
     }
     for (const st of P.structures) {
-      if (st.source === 'connection' && st.mode === 'flat' && (st.connA.crossing === 'bridge' || st.connB.crossing === 'bridge')) {
-        const want = [st.connA, st.connB].find(k => k.crossing === 'bridge');
-        add('info', `${st.label}: ${want.colorName} ist auf „Brücke/Tunnel“ gestellt, ${listDe(st.flatBy.map(k => k.colorName))} auf „ebenerdig“ – „ebenerdig“ hat Vorrang, die Stelle bleibt flach. Über das K-Schild lässt sie sich einzeln umstellen.`, [st.label]);
+      if (st.mode === 'flat' && st.source !== 'override' && st.wantsBridge.length) {
+        const names = (list) => listDe(uniq(list.map(t => `${t.conn.colorName} (${dirName(t)})`)));
+        add('info', `${st.label}: ${names(st.wantsBridge)} soll mit Brücke/Tunnel kreuzen, ${names(st.flatBy)} ebenerdig – „ebenerdig“ hat Vorrang, die Stelle bleibt flach. Über das K-Schild lässt sie sich einzeln umstellen.`, [st.label]);
       }
-      if (st.mode === 'flat') add('warn', `${st.label} ist eine Flachkreuzung: ${st.connA.colorName} und ${st.connB.colorName} müssen sich abwechseln. Mit Brücke oder Tunnel fällt der Konflikt weg.`, [st.label]);
+      if (st.mode === 'flat') add('warn', `${st.label} ist eine Flachkreuzung (${st.text}): die Züge müssen sich dort abwechseln. Mit Brücke oder Tunnel fällt der Konflikt weg.`, [st.label]);
     }
     for (const pr of P.presorts) {
       const parts = pr.lanes.map(L => `G${L.no} → ${uniq(L.strands.map(s => s.flow.to.name)).join(', ')}`);
